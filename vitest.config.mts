@@ -7,6 +7,9 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "./src"),
+      // The real package throws when resolved under the "browser"
+      // condition, which Vitest uses for jsdom/happy-dom environments.
+      "server-only": path.resolve(import.meta.dirname, "./test/stubs/server-only.ts"),
     },
   },
   test: {
