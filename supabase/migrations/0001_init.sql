@@ -15,6 +15,10 @@
 --   - Extensions/indexes/enabling RLS/publication membership are guarded
 --     the same way, each with whatever "if not exists" equivalent Postgres
 --     offers for that object type.
+--   - The one exception is `players.client_token`: it's dropped (guarded,
+--     via dynamic SQL) after being backfilled into player_secrets. That's a
+--     column drop, not a table drop, and only fires if the column is still
+--     there from a previous run of an earlier version of this file.
 
 create extension if not exists pgcrypto;
 
@@ -63,10 +67,6 @@ alter table players add column if not exists in_jail boolean not null default fa
 alter table players add column if not exists jail_turns int not null default 0;
 alter table players add column if not exists jail_free_cards int not null default 0;
 alter table players add column if not exists bankrupt boolean not null default false;
-alter table players add column if not exists client_token text not null;
-
-comment on column players.client_token is
-  'Secret used to prove identity on reconnect. Readable via the anon players policy below — see migration notes.';
 
 do $$
 begin
@@ -77,6 +77,47 @@ begin
   ) then
     alter table players
       add constraint players_game_id_seat_index_key unique (game_id, seat_index);
+  end if;
+end $$;
+
+-- ============================================================================
+-- player_secrets
+--
+-- The reconnect secret lives here instead of on players, because RLS is
+-- row-level, not column-level: players has a blanket anon read policy
+-- (below), and there's no way to carve client_token out of that with a
+-- policy alone. This table gets no policies at all — only the service role
+-- (which bypasses RLS) may read or write it — and it is never added to the
+-- realtime publication.
+-- ============================================================================
+
+create table if not exists player_secrets (
+  player_id uuid primary key references players(id) on delete cascade
+);
+
+alter table player_secrets add column if not exists client_token text not null unique;
+alter table player_secrets add column if not exists created_at timestamptz default now();
+
+comment on table player_secrets is
+  'Reconnect secrets. Deliberately has no RLS policies — only the service role may read or write it.';
+
+-- Backfill any client_token values still on players (from an earlier
+-- version of this migration having already run), then drop that column.
+-- The dynamic SQL means this whole block is a no-op once the column is
+-- gone, so re-running this file stays safe either way.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'players' and column_name = 'client_token'
+  ) then
+    execute '
+      insert into player_secrets (player_id, client_token)
+      select id, client_token from players
+      where client_token is not null
+      on conflict (player_id) do nothing
+    ';
+    execute 'alter table players drop column client_token';
   end if;
 end $$;
 
@@ -189,10 +230,14 @@ alter table games enable row level security;
 alter table players enable row level security;
 alter table rolls enable row level security;
 alter table events enable row level security;
+alter table player_secrets enable row level security;
 
 -- Deliberately NO anon select policy on games itself: it holds server_seed.
 -- Anon reads go through the games_public view instead (below), which masks
 -- server_seed until the game is finished.
+
+-- Deliberately NO policies at all on player_secrets — see its table
+-- comment above. Only the service role may touch it.
 
 drop policy if exists "anon can read players" on players;
 create policy "anon can read players" on players
