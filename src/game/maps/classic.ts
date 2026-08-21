@@ -101,6 +101,7 @@ export const classicMap: GameMap = {
   name: "Classic",
   tagline: "The plain classic experience.",
   flagEmoji: "🎩",
+  theme: "modern",
   currency: "CAD",
   jailLabel: "Jail",
   freeParkingLabel: "Free Parking",

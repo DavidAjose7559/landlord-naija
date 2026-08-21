@@ -6,6 +6,7 @@ import { MAP_LIST, MAPS } from "@/game/maps";
 import type { GameSettings } from "@/game/types";
 import type { PublicGame } from "@/lib/api/public-game";
 import { formatCAD } from "@/lib/money";
+import { MapThumbnail } from "./MapThumbnail";
 import { Modal } from "./Modal";
 
 interface SettingsPanelProps {
@@ -278,20 +279,28 @@ export function SettingsPanel({ game, isHost, roomCode, clientToken }: SettingsP
                 void patch({ mapId: m.id });
                 setMapPickerOpen(false);
               }}
-              className={`flex flex-col gap-1 rounded-xl px-4 py-3 text-left transition-colors ${
+              className={`flex items-start gap-3 rounded-xl px-4 py-3 text-left transition-colors ${
                 m.id === settings.mapId ? "bg-accent/20 ring-1 ring-accent" : "border border-white/8 bg-surface-2 hover:bg-white/10"
               }`}
             >
-              <span className="flex items-center gap-2 text-sm font-semibold text-ink">
-                <span className="text-lg">{m.flagEmoji}</span>
-                {m.name}
-              </span>
-              <span className="text-xs text-muted">{m.tagline}</span>
-              <span className="flex flex-wrap gap-1 pt-1 text-[11px] text-muted">
-                {m.regions.map((r) => (
-                  <span key={r.id}>{r.flagEmoji ?? ""} {r.name}</span>
-                ))}
-              </span>
+              <MapThumbnail theme={m.theme} />
+              <div className="flex flex-col gap-1">
+                <span className="flex items-center gap-2 text-sm font-semibold text-ink">
+                  <span className="text-lg">{m.flagEmoji}</span>
+                  {m.name}
+                  {m.theme === "heritage" && (
+                    <span className="rounded-full bg-gold/20 px-2 py-0.5 text-[10px] font-medium tracking-wide text-gold uppercase">
+                      Heritage
+                    </span>
+                  )}
+                </span>
+                <span className="text-xs text-muted">{m.tagline}</span>
+                <span className="flex flex-wrap gap-1 pt-1 text-[11px] text-muted">
+                  {m.regions.map((r) => (
+                    <span key={r.id}>{r.flagEmoji ?? ""} {r.name}</span>
+                  ))}
+                </span>
+              </div>
             </button>
           ))}
           <button

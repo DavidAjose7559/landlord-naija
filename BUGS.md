@@ -420,3 +420,85 @@ unit test covers the no-roomCode case end-to-end (game_id/room_code null,
 locally; production commit SHA populating correctly is verified separately
 once deployed (see README).
 
+## 8. Fifth map ('original') and a per-map visual theme layer
+
+Added a `theme: 'modern' | 'heritage'` field on `GameMap` — a property of
+the map, never a user setting. Every colour, board-rendering value
+(grid-rule weight, shadow, paper-grain strength) and font family a themed
+component needs is a CSS custom property, defined at `:root` and
+redefined per `[data-theme]` scope in `src/app/globals.css`; the page sets
+`data-theme` on one ancestor element (`game/[code]/page.tsx` and
+`lobby/page.tsx`, keyed off the current map's theme) and every token
+cascades to descendants from there — `Board.tsx`, `PlayerPanel.tsx`, and
+`PropertyInspector.tsx` never check which theme is active, they just
+consume `--color-*`/`--board-*`/`--font-*` tokens (colour groups via
+`src/lib/board-colors.ts`'s `COLOR_GROUP_VAR`, `var(--color-group-*)`
+references, not raw hex — renamed from `COLOR_GROUP_HEX` since it no
+longer holds hex at all).
+
+**Real bug found while building this, not specific to heritage:** the
+board's 9x9 interior isn't covered by any space — it was falling through
+to the grid container's own background, `bg-board-line`, which exists
+purely to draw the hairline rules in the gaps between adjacent cells.
+Modern's line colour is a pale tan close to the board colour, so this
+never looked wrong — same board-on-board wash either way. Heritage's line
+colour is near-black, and the same fallthrough turned the entire centre
+into a solid black void. Fixed by explicitly filling that 9x9 area with
+`bg-board` as its own grid item — a correct fix in both themes, not a
+heritage-only patch (`Board.tsx`).
+
+Added `MapId 'original'` (registry: naija, worldTour, canada, classic,
+original — classic untouched) with period place names on the existing
+40-space skeleton, same 8 colour groups and $60→$400 price ladder, 16
+treasure/16 surprise cards with period flavour. Passes every existing
+per-map structural test with zero map-specific test code, since
+`maps.test.ts` parametrizes over `MAP_LIST`.
+
+Heritage treatment: pale sage board face with heavy 2px black rules
+(vs. modern's 1px near-board-colour hairline), flat — `box-shadow: none`
+— where modern casts a raised-slab shadow, ~4% paper grain (modern: 3%),
+and Oswald (self-hosted via `next/font/google`, weights 500/700) for
+property names/prices instead of Geist. The JAIL corner always renders an
+unconditional "just visiting" strip (a space-type branch, not a theme
+branch — modern's CSS just leaves it visually unified with the rest of
+the corner).
+
+Map picker (`SettingsPanel.tsx`) gets a `MapThumbnail` per map — a real
+40px swatch scoped to that map's own `data-theme`, not a hand-drawn icon —
+plus a gold "Heritage" badge on Original. First pass used only the board
+colour and colour-group swatches to differentiate themes in the
+thumbnail; at 40px, sage-vs-cream board colour was too close in lightness
+to read at a glance even though it was resolving correctly (verified via
+`getComputedStyle`). Added a 2px border in `var(--color-board-line)` —
+heritage's near-black vs. modern's pale tan — which is what actually
+makes the two read as different designs in the picker before you've
+selected either.
+
+**Verified:** 35 new structural tests (`test/theme.test.ts`) — every
+rendering token defined by one theme is defined by the other, heritage's
+`--h-*` palette and colour-group hex match the spec exactly, heritage is
+flatter/heavier/grainier than modern per-token, heritage's display font
+resolves to Oswald and modern's to Geist, zero raw hex literals in any
+board/panel component or `board-colors.ts`, every map but 'original' is
+`modern` and 'original' is `heritage`. `original` itself passes all 7
+parametrized per-map assertions in `maps.test.ts` (40 spaces, type
+counts, 2/3/3/3/3/3/3/2 regions, monotonic rent, choice/flat tax
+placement, 16 cards/deck with exactly one jail-free each) — 36/36 passing
+there, 236/236 across the whole suite.
+
+Live-verified locally: created one game on `naija` and one on `original`,
+screenshotted both boards side by side — sage-vs-parchment board face,
+heavy black vs. hairline tan rules, flat vs. raised-shadow edge (visible
+directly in the screenshot: the modern board casts a soft gradient onto
+the table around it, heritage's sits flush), and condensed/bold Oswald
+vs. Geist property names are all immediately visually distinct. Confirmed
+legible at a ~375px mobile viewport (zoomed crop of "BISHOPSGATE RISE
+$260" fully readable at that width). Confirmed via `document.fonts` and
+`getComputedStyle` in-browser that `.board-space-name` resolves to
+`Oswald, "Oswald Fallback"` at weight 700 on the heritage board and
+`Geist, "Geist Fallback", ...` at weight 600 on modern, and that `Oswald`
+appears in `document.fonts` with `status: "loaded"` — not a silent
+fallback. Opened the map picker, confirmed all four modern maps render
+visually identical thumbnails and Original's renders distinctly
+(sage-tinted, black-bordered) with the gold Heritage badge.
+

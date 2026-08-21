@@ -65,7 +65,9 @@ describe.each(MAP_LIST)("map: $id ($name)", (map) => {
 });
 
 describe("MAP_LIST", () => {
-  it("has all 4 maps with unique ids", () => {
-    expect(MAP_LIST.map((m) => m.id).sort()).toEqual(["canada", "classic", "naija", "worldTour"].sort());
+  it("has all 5 maps with unique ids", () => {
+    expect(MAP_LIST.map((m) => m.id).sort()).toEqual(
+      ["canada", "classic", "naija", "original", "worldTour"].sort(),
+    );
   });
 });

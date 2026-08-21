@@ -1,7 +1,16 @@
 import type { Card } from "../cards";
 import type { ColorGroup, Space } from "../board";
 
-export type MapId = "naija" | "worldTour" | "canada" | "classic";
+export type MapId = "naija" | "worldTour" | "canada" | "classic" | "original";
+
+// Which design system a map's board/panel render with (src/app/globals.css
+// "Theme layer" — every --color-*/--board-*/--font-* token a component
+// consumes is redefined per scope, never branched on in JS). A property
+// of the map, never a user setting: picking the map picks the look.
+// 'modern' is the existing parchment-on-felt look every map but
+// 'original' uses; 'heritage' is the new vintage property-trading-board
+// look, used only by 'original'.
+export type MapTheme = "modern" | "heritage";
 
 // A region is the named, flagged successor to a bare "colour group" — but
 // it's still anchored to one of the 8 fixed colour slots (every map has
@@ -19,6 +28,7 @@ export interface GameMap {
   name: string;
   tagline: string;
   flagEmoji: string;
+  theme: MapTheme;
   currency: "CAD";
   // Per-map flavour labels for the two universally-generic spaces/decks.
   // The engine and UI fall back to the generic term when a map has none

@@ -20,10 +20,19 @@ and Framer Motion.
 
 ## Game features
 
-- **Four maps** (`src/game/maps/`) — Naija Edition (Lagos, Abuja, Enugu, Port Harcourt, Ibadan,
-  Kano...), World Tour (one country per colour group), Canada, and Classic — same 40-space layout
-  and rules underneath, only names and card flavour differ. Naija Edition's two card decks are
-  **Owambe** (mostly good news) and **Village People** (chaos).
+- **Five maps** (`src/game/maps/`) — Naija Edition (Lagos, Abuja, Enugu, Port Harcourt, Ibadan,
+  Kano...), World Tour (one country per colour group), Canada, Classic, and Original — same
+  40-space layout and rules underneath, only names, card flavour, and (Original only) the visual
+  theme differ. Naija Edition's two card decks are **Owambe** (mostly good news) and **Village
+  People** (chaos).
+- **Two visual themes.** Every map carries a `theme: 'modern' | 'heritage'` (never a user setting —
+  picking the map picks the look). Naija/World Tour/Canada/Classic use **modern**, the parchment-
+  on-felt board with a raised shadow. **Original** uses **heritage**: a flat, heavy-ruled vintage
+  property-trading-board look with its own Oswald-set type. Every colour/shadow/grid-weight/font
+  value a themed component needs is a CSS custom property redefined per `[data-theme]` scope in
+  `src/app/globals.css` — `Board.tsx`, `PlayerPanel.tsx`, and `PropertyInspector.tsx` only ever
+  consume those tokens (via `src/lib/board-colors.ts`'s `var(--color-group-*)` references, never a
+  raw hex) and never check which theme is active.
 - **Configurable rooms.** The host sets starting cash, whether rent doubles on a full colour-group
   monopoly, free parking cash, auctions, mortgaging, even-build, manual bankruptcy, whether
   bankruptcy transfers assets to the creditor or returns them to the bank, trading, and a turn time

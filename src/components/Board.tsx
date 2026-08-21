@@ -6,7 +6,7 @@ import type { Space } from "@/game/board";
 import { MAPS } from "@/game/maps";
 import type { GameState, PlayerState } from "@/game/types";
 import { formatCAD } from "@/lib/money";
-import { COLOR_GROUP_HEX } from "@/lib/board-colors";
+import { COLOR_GROUP_VAR } from "@/lib/board-colors";
 import { PLAYER_TOKEN_COLOR } from "@/lib/tokens";
 import { TokenIcon } from "./TokenIcon";
 
@@ -164,7 +164,11 @@ function describeSpace(space: Space, ownership: GameState["ownership"], players:
 }
 
 function SpaceBar({ color }: { color: string }) {
-  return <div className="h-3 w-full shrink-0" style={{ backgroundColor: color }} />;
+  // .board-space-bar: heritage adds a black rule beneath the strip (see
+  // globals.css) — Board.tsx never checks which theme is active, it just
+  // always emits this class and lets the ambient [data-theme] scope decide
+  // whether that rule exists.
+  return <div className="board-space-bar h-3 w-full shrink-0" style={{ backgroundColor: color }} />;
 }
 
 function HousePips({ houses, hotel, barColor }: { houses: number; hotel: boolean; barColor: string }) {
@@ -212,20 +216,20 @@ function BoardSpace({
   const ownable = space.type === "property" || space.type === "transport" || space.type === "utility";
   const own = ownable ? state.ownership[space.index] : undefined;
   const owner = own ? state.players.find((p) => p.id === own.ownerId) : undefined;
-  const barColor = space.type === "property" ? COLOR_GROUP_HEX[space.color] : undefined;
+  const barColor = space.type === "property" ? COLOR_GROUP_VAR[space.color] : undefined;
 
   const label = describeSpace(space, state.ownership, state.players);
 
   const bar = barColor ? <SpaceBar color={barColor} /> : null;
   const content = (
     <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-0.5 py-0.5 text-center">
-      <span className="line-clamp-2 text-[7px] leading-tight font-semibold tracking-wide text-board-ink uppercase">
+      <span className="board-space-name line-clamp-2 text-[7px] leading-tight font-semibold tracking-wide text-board-ink uppercase">
         {space.name}
       </span>
       {space.type === "property" || space.type === "transport" || space.type === "utility" ? (
-        <span className="text-[7px] tabular-nums text-board-ink/60">{formatCAD(space.price)}</span>
+        <span className="board-price text-[7px] tabular-nums text-board-ink/60">{formatCAD(space.price)}</span>
       ) : space.type === "tax" ? (
-        <span className="text-[7px] tabular-nums text-board-ink/60">{formatCAD(space.amount)}</span>
+        <span className="board-price text-[7px] tabular-nums text-board-ink/60">{formatCAD(space.amount)}</span>
       ) : null}
       {own && !own.mortgaged && space.type === "property" && (
         <HousePips houses={own.houses} hotel={own.hotel} barColor={barColor!} />
@@ -265,15 +269,27 @@ function BoardSpace({
       )}
 
       <div
-        className={`flex h-full w-full flex-col ${edge === "corner" ? "items-center justify-center gap-1 p-1 text-center" : ""}`}
-        style={rotation ? { transform: `rotate(${rotation}deg)` } : undefined}
+        className={`flex h-full w-full flex-col ${edge === "corner" ? "items-center justify-center gap-1 text-center" : ""}`}
+        style={{
+          ...(rotation ? { transform: `rotate(${rotation}deg)` } : undefined),
+          ...(edge === "corner" ? { padding: "var(--board-corner-padding)" } : undefined),
+        }}
       >
         {edge === "corner" ? (
           <>
             <span className="text-lg leading-none">{cornerIcon(space)}</span>
-            <span className="text-[9px] leading-tight font-semibold tracking-wide text-board-ink uppercase">
+            <span className="board-space-name text-[9px] leading-tight font-semibold tracking-wide text-board-ink uppercase">
               {space.name}
             </span>
+            {/* Always rendered for the jail corner (a space-type branch,
+                not a theme branch) — modern's CSS leaves it visually
+                unified with the rest of the corner, heritage tints it as
+                a distinct strip. See .board-jail-visiting in globals.css. */}
+            {space.type === "jail" && (
+              <span className="board-jail-visiting w-full rounded-[2px] px-1 py-0.5 text-[6px] leading-none tracking-wide text-board-ink/60 uppercase">
+                Just visiting
+              </span>
+            )}
           </>
         ) : barGoesFirst(edge) ? (
           <>
@@ -329,11 +345,28 @@ export function Board({ state, className, onInspect }: BoardProps) {
       className={`relative mx-auto w-full max-w-[760px] rounded-[28px] p-3 sm:p-6 ${className ?? ""}`}
       style={{ background: "radial-gradient(circle at 50% 42%, var(--color-canvas) 0%, var(--color-canvas-edge) 100%)" }}
     >
-      <div className="board-paper-texture relative aspect-square w-full overflow-hidden rounded-[2px] bg-board shadow-[0_24px_60px_-18px_rgba(0,0,0,0.7)]">
-        <div role="grid" aria-label="Game board" className="grid h-full w-full grid-cols-11 grid-rows-11 gap-px bg-board-line">
+      <div
+        className="board-paper-texture relative aspect-square w-full overflow-hidden rounded-[2px] bg-board"
+        style={{ boxShadow: "var(--board-shadow)" }}
+      >
+        <div
+          role="grid"
+          aria-label="Game board"
+          className="grid h-full w-full grid-cols-11 grid-rows-11 bg-board-line"
+          style={{ gap: "var(--board-grid-gap)" }}
+        >
           {spaces.map((space) => (
             <BoardSpace key={space.index} space={space} state={state} onInspect={onInspect} />
           ))}
+          {/* The 9x9 interior isn't covered by any space — without this,
+              it falls through to the grid's own background (bg-board-line,
+              used elsewhere purely to draw the hairline rules in the gaps
+              between cells). That reads as a barely-there tan-on-tan
+              mismatch in the modern theme, but heritage's near-black line
+              colour turns the entire centre into a solid void. Filling it
+              explicitly is the correct fix in both themes, not a
+              heritage-only patch. */}
+          <div className="bg-board" style={{ gridRow: "2 / 11", gridColumn: "2 / 11" }} aria-hidden="true" />
         </div>
 
         <div className="pointer-events-none absolute inset-0 z-30">

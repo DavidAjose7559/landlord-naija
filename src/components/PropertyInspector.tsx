@@ -17,7 +17,7 @@ import {
 import { computePropertyRent, JAIL_FINE, MAX_JAIL_TURNS, ownsFullUnmortgagedGroup } from "@/game/engine";
 import { MAPS } from "@/game/maps";
 import type { GameState, PlayerState } from "@/game/types";
-import { COLOR_GROUP_HEX } from "@/lib/board-colors";
+import { COLOR_GROUP_VAR } from "@/lib/board-colors";
 import { PLAYER_TOKEN_COLOR } from "@/lib/tokens";
 import { Modal } from "./Modal";
 import { Money } from "./Money";
@@ -357,7 +357,7 @@ function PropertyBody({
   const map = MAPS[state.settings.mapId];
   const region = map.regions.find((r) => r.id === space.color);
   const own = state.ownership[space.index];
-  const barColor = COLOR_GROUP_HEX[space.color];
+  const barColor = COLOR_GROUP_VAR[space.color];
   const owner = ownerOf(state, own?.ownerId);
 
   let currentTierIndex: number | null = null;

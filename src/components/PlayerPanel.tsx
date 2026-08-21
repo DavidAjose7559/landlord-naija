@@ -13,7 +13,7 @@ import { MAPS } from "@/game/maps";
 import type { PlayerState } from "@/game/types";
 import type { ClientAction } from "@/lib/api/client-action";
 import type { PublicGame } from "@/lib/api/public-game";
-import { COLOR_GROUP_HEX } from "@/lib/board-colors";
+import { COLOR_GROUP_VAR } from "@/lib/board-colors";
 import { formatCAD } from "@/lib/money";
 import type { PlayerSession } from "@/lib/session";
 import { Money } from "./Money";
@@ -155,7 +155,7 @@ function Portfolio({
             {spaces[0].color && (
               <span
                 className="h-2.5 w-2.5 rounded-full"
-                style={{ backgroundColor: COLOR_GROUP_HEX[spaces[0].color] }}
+                style={{ backgroundColor: COLOR_GROUP_VAR[spaces[0].color] }}
               />
             )}
             <span className="text-[11px] font-medium tracking-wide text-muted uppercase">{key}</span>

@@ -43,7 +43,7 @@ export default function RulesPage() {
       </Section>
 
       <Section title="Maps">
-        <p>Every map uses the same 40-space layout and rules — only the names and flavour change:</p>
+        <p>Every map uses the same 40-space layout and rules — only the names, flavour, and (for Original) the look change:</p>
         <p>
           <span className="font-medium text-ink">Naija Edition</span> — Lagos, Abuja, Enugu, Port Harcourt, Ibadan,
           Kano and beyond, with Owambe and Village People cards.{" "}
@@ -51,7 +51,9 @@ export default function RulesPage() {
           (🇳🇬🇬🇭🇿🇦🇧🇷🇬🇧🇫🇷🇨🇦🇺🇸).{" "}
           <span className="font-medium text-ink">Canada</span> — provinces and territories, Toronto anchoring the
           top group. <span className="font-medium text-ink">Classic</span> — the familiar board, generically
-          renamed.
+          renamed. <span className="font-medium text-ink">Original</span> — period street names on a vintage,
+          heritage-styled board: a pale, heavy-ruled face instead of the other maps&apos; raised parchment slab, with
+          its own Oswald-set type.
         </p>
       </Section>
 

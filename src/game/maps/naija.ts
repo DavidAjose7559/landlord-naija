@@ -100,6 +100,7 @@ export const naijaMap: GameMap = {
   name: "Naija Edition",
   tagline: "Buy Lagos. Own Naija.",
   flagEmoji: "🇳🇬",
+  theme: "modern",
   currency: "CAD",
   jailLabel: "Kirikiri",
   freeParkingLabel: "Detty December",

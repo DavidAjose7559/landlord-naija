@@ -8,7 +8,7 @@ import { parseJsonBody, parseRoomCode } from "@/lib/api/validate";
 // Lobby-only, host-only. Mirrors createGameSchema's settings shape, but
 // every field stays optional here too — this is a patch, not a replace.
 const settingsSchema = z.object({
-  mapId: z.enum(["naija", "worldTour", "canada", "classic"]),
+  mapId: z.enum(["naija", "worldTour", "canada", "classic", "original"]),
   maxPlayers: z.number().int().min(2).max(8),
   privateRoom: z.boolean(),
   startingCashCents: z.number().int().positive(),

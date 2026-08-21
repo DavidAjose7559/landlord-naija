@@ -100,6 +100,7 @@ export const canadaMap: GameMap = {
   name: "Canada",
   tagline: "Coast to coast to coast.",
   flagEmoji: "🇨🇦",
+  theme: "modern",
   currency: "CAD",
   jailLabel: "Jail",
   freeParkingLabel: "Free Parking",

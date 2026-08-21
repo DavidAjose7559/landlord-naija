@@ -16,7 +16,7 @@ const createGameSchema = z
   .object({
     settings: z
       .object({
-        mapId: z.enum(["naija", "worldTour", "canada", "classic"]),
+        mapId: z.enum(["naija", "worldTour", "canada", "classic", "original"]),
         maxPlayers: z.number().int().min(2).max(8),
         privateRoom: z.boolean(),
         startingCashCents: z.number().int().positive(),
