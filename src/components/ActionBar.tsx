@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Deck } from "@/game/board";
-import { computeDebtReliefPlan, netWorth } from "@/game/engine";
+import { computeDebtReliefPlan } from "@/game/engine";
 import { MAPS } from "@/game/maps";
 import type { PlayerState } from "@/game/types";
 import type { ClientAction } from "@/lib/api/client-action";
@@ -145,10 +145,6 @@ export function ActionBar({ game, session, dispatch }: ActionBarProps) {
 
           {game.turnPhase === "awaiting_purchase" && <BuyPrompt game={game} busy={busy} act={act} />}
 
-          {game.turnPhase === "awaiting_tax_choice" && game.state.pendingTaxChoice && (
-            <TaxChoicePrompt game={game} busy={busy} act={act} />
-          )}
-
           {game.turnPhase === "awaiting_payment" && game.state.pendingDebt && (
             <DebtPanel game={game} me={me} busy={busy} act={act} />
           )}
@@ -225,48 +221,6 @@ function BuyPrompt({
   );
 }
 
-function TaxChoicePrompt({
-  game,
-  busy,
-  act,
-}: {
-  game: PublicGame;
-  busy: boolean;
-  act: (action: ClientAction) => Promise<{ ok: boolean; reason?: string } | null>;
-}) {
-  const player = game.state.players[game.state.currentPlayerIndex];
-  const spaceIndex = game.state.pendingTaxChoice?.spaceIndex;
-  const space = spaceIndex !== undefined ? MAPS[game.state.settings.mapId].spaces[spaceIndex] : undefined;
-  if (!space || space.type !== "tax" || !space.choice) return null;
-
-  const percentAmount = Math.round((netWorth(game.state, player.id) * space.choice.percentOfNetWorth) / 100);
-
-  return (
-    <div className="flex flex-col gap-3 rounded-2xl bg-surface px-4 py-4">
-      <p className="text-sm text-ink">
-        <span className="font-semibold">{space.name}</span> — pay a flat amount, or a percentage of your net worth?
-      </p>
-      <div className="flex gap-2">
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => act({ type: "CHOOSE_TAX", option: "flat" })}
-          className="flex-1 rounded-full bg-surface-2 px-4 py-2.5 text-sm font-semibold text-ink disabled:opacity-40"
-        >
-          Pay {formatCAD(space.choice.flatAmountCents)}
-        </button>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => act({ type: "CHOOSE_TAX", option: "percent" })}
-          className="flex-1 rounded-full bg-surface-2 px-4 py-2.5 text-sm font-semibold text-ink disabled:opacity-40"
-        >
-          Pay {space.choice.percentOfNetWorth}% ({formatCAD(percentAmount)})
-        </button>
-      </div>
-    </div>
-  );
-}
 
 // The debt panel: never auto-liquidates anything. Choice 1 ("raise it
 // myself") is just closing this and using the normal mortgage/sell-house

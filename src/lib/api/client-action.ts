@@ -37,7 +37,6 @@ export const clientActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("SELL_HOUSE"), spaceIndex: spaceIndexSchema }).strict(),
   z.object({ type: z.literal("MORTGAGE"), spaceIndex: spaceIndexSchema }).strict(),
   z.object({ type: z.literal("UNMORTGAGE"), spaceIndex: spaceIndexSchema }).strict(),
-  z.object({ type: z.literal("CHOOSE_TAX"), option: z.enum(["flat", "percent"]) }).strict(),
   z.object({ type: z.literal("PAY_JAIL_FINE") }).strict(),
   z.object({ type: z.literal("USE_JAIL_FREE") }).strict(),
   z.object({ type: z.literal("END_TURN") }).strict(),

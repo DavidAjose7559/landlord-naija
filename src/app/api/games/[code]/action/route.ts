@@ -101,13 +101,6 @@ async function resolveConcreteAction(
         deckStatePayload: null,
       };
 
-    case "CHOOSE_TAX":
-      return {
-        action: { type: "CHOOSE_TAX", playerId: player.id, option: action.option },
-        rollPayload: null,
-        deckStatePayload: null,
-      };
-
     case "PLACE_BID":
       return {
         action: { type: "PLACE_BID", playerId: player.id, amount: action.amount },

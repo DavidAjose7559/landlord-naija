@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { makeChoiceTax, makeProperty, makeTax } from "./board";
+import { makeProperty, makeTax } from "./board";
 
 // Per-map structural assertions (40 spaces, region shape, rent monotonicity,
 // deck sizes, ...) live in src/game/maps/maps.test.ts, run against every
@@ -33,16 +33,9 @@ describe("makeProperty", () => {
   });
 });
 
-describe("makeTax / makeChoiceTax", () => {
-  it("makeTax has no choice field", () => {
+describe("makeTax", () => {
+  it("produces a flat, integer-cents charge", () => {
     const space = makeTax(38, "Luxury Tax", 100);
-    expect(space.choice).toBeUndefined();
     expect(space.amount).toBe(10_000);
-  });
-
-  it("makeChoiceTax carries both the flat amount and the percent option", () => {
-    const space = makeChoiceTax(4, "Income Tax", 200, 10);
-    expect(space.choice).toEqual({ flatAmountCents: 20_000, percentOfNetWorth: 10 });
-    expect(space.amount).toBe(20_000); // amount mirrors the flat option
   });
 });

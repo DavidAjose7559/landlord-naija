@@ -38,6 +38,7 @@ export interface GameSettings {
   randomizePlayerOrder: boolean; // shuffled at START_GAME time (outside the pure engine, like card shuffling)
   doubleRentOnFullSet: boolean;
   freeParkingCash: boolean; // tax payments pool into GameState.freeParkingPot, paid out on landing
+  freeParkingSkipsTurn: boolean; // landing on Free Parking/its map equivalent forces the player to miss their next turn
   auctionOnDecline: boolean; // decline/can't-afford -> awaiting_auction instead of staying with the bank
   collectRentWhileJailed: boolean; // false = no rent owed to a currently-jailed owner
   mortgageEnabled: boolean;
@@ -56,6 +57,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   randomizePlayerOrder: true,
   doubleRentOnFullSet: true,
   freeParkingCash: false,
+  freeParkingSkipsTurn: false,
   auctionOnDecline: false,
   collectRentWhileJailed: true,
   mortgageEnabled: true,
@@ -71,7 +73,6 @@ export type TurnPhase =
   | "awaiting_roll" // must ROLL (or PAY_JAIL_FINE/USE_JAIL_FREE if in jail)
   | "awaiting_purchase" // landed on an unowned space; BUY or DECLINE_BUY
   | "awaiting_auction" // (auctionOnDecline) declined/can't afford; PLACE_BID or PASS_AUCTION
-  | "awaiting_tax_choice" // landed on a choice tax space; CHOOSE_TAX flat|percent
   | "awaiting_payment" // owes rent/tax/a card's pay effect; see pendingDebt
   | "awaiting_card" // landed on a card space; waiting for a DRAW_CARD action
   | "awaiting_end_turn" // move fully resolved; may build/trade/mortgage, then END_TURN
@@ -90,6 +91,10 @@ export interface PlayerState {
   jailTurns: number;
   jailFreeCards: number;
   bankrupt: boolean;
+  // (settings.freeParkingSkipsTurn) armed on landing on Free Parking/its
+  // map equivalent; consumed (and cleared) the next time advanceTurn()
+  // would otherwise hand this player the roll.
+  skipNextTurn: boolean;
 }
 
 // Ownership/build state for one ownable space (property, transport, or
@@ -152,11 +157,6 @@ export interface GameState {
   // (which owns deck/shuffle state, outside this pure engine) draws from
   // this deck and dispatches DRAW_CARD with the result.
   pendingCardDeck: Deck | null;
-
-  // Set when the current player has landed on a choice tax space (e.g.
-  // Income Tax); CHOOSE_TAX resolves it into either a direct charge or a
-  // pendingDebt.
-  pendingTaxChoice: { spaceIndex: number } | null;
 
   pendingDebt: PendingDebt | null;
   pendingAuction: PendingAuction | null;

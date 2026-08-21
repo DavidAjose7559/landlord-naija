@@ -46,13 +46,11 @@ describe.each(MAP_LIST)("map: $id ($name)", (map) => {
     }
   });
 
-  it("has a choice tax at index 4 and a flat tax at index 38", () => {
+  it("has a flat tax at index 4 and index 38", () => {
     const incomeTax = map.spaces[4];
     const luxuryTax = map.spaces[38];
     expect(incomeTax.type).toBe("tax");
     expect(luxuryTax.type).toBe("tax");
-    if (incomeTax.type === "tax") expect(incomeTax.choice).toBeDefined();
-    if (luxuryTax.type === "tax") expect(luxuryTax.choice).toBeUndefined();
   });
 
   it.each(["treasure", "surprise"] as const)("%s deck has exactly 16 cards with exactly one jail-free card", (deck) => {

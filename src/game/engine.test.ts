@@ -31,6 +31,7 @@ function makePlayer(id: string, seatIndex: number, overrides: Partial<PlayerStat
     jailTurns: 0,
     jailFreeCards: 0,
     bankrupt: false,
+    skipNextTurn: false,
     ...overrides,
   };
 }
@@ -49,7 +50,6 @@ function makeState(players: PlayerState[], overrides: Partial<GameState> = {}): 
     winnerPlayerId: null,
     lastRoll: null,
     pendingCardDeck: null,
-    pendingTaxChoice: null,
     pendingDebt: null,
     pendingAuction: null,
     freeParkingPot: 0,
@@ -655,12 +655,10 @@ describe("settings", () => {
 
   it("freeParkingCash: tax payments pool and pay out at Free Parking when ON, never accumulate when OFF", () => {
     function potAfterTax(freeParkingCash: boolean): number {
-      const state = makeState([makePlayer("p1", 0, { position: 4, cashCents: 100_000 })], {
+      const state = makeState([makePlayer("p1", 0, { position: 0, cashCents: 100_000 }), makePlayer("p2", 1)], {
         settings: { ...DEFAULT_SETTINGS, freeParkingCash },
-        turnPhase: "awaiting_tax_choice",
-        pendingTaxChoice: { spaceIndex: 4 },
       });
-      const { state: next } = reduce(state, { type: "CHOOSE_TAX", playerId: "p1", option: "flat" });
+      const { state: next } = reduce(state, { type: "ROLL", playerId: "p1", d1: 3, d2: 1 }); // 0+4=4, flat tax
       return next.freeParkingPot;
     }
     expect(potAfterTax(true)).toBeGreaterThan(0);
@@ -676,6 +674,34 @@ describe("settings", () => {
     expect(next.players[0].cashCents).toBe(6_000);
     expect(next.freeParkingPot).toBe(0);
     expect(events.some((e) => e.type === "FREE_PARKING_PAID")).toBe(true);
+  });
+
+  it("freeParkingSkipsTurn: landing there arms a skip when ON, does nothing when OFF", () => {
+    function skipArmedAfterLanding(freeParkingSkipsTurn: boolean): boolean {
+      const state = makeState([makePlayer("p1", 0, { position: 16, cashCents: 1_000 }), makePlayer("p2", 1)], {
+        settings: { ...DEFAULT_SETTINGS, freeParkingSkipsTurn },
+      });
+      const { state: next } = reduce(state, { type: "ROLL", playerId: "p1", d1: 2, d2: 2 }); // 16+4=20, Free Parking
+      return next.players[0].skipNextTurn;
+    }
+    expect(skipArmedAfterLanding(true)).toBe(true);
+    expect(skipArmedAfterLanding(false)).toBe(false);
+  });
+
+  it("freeParkingSkipsTurn: the armed player's next turn is skipped, logged, and the flag is consumed", () => {
+    const p1 = makePlayer("p1", 0, { skipNextTurn: true });
+    const p2 = makePlayer("p2", 1);
+    const p3 = makePlayer("p3", 2);
+    const state = makeState([p1, p2, p3], {
+      settings: { ...DEFAULT_SETTINGS, freeParkingSkipsTurn: true },
+      currentPlayerIndex: 2, // p3's turn is ending; p1 (index 0) is next and should be skipped
+      turnPhase: "awaiting_end_turn",
+    });
+    const { state: next, events } = reduce(state, { type: "END_TURN", playerId: "p3" });
+
+    expect(next.currentPlayerIndex).toBe(1); // skipped straight past p1 to p2
+    expect(next.players[0].skipNextTurn).toBe(false); // consumed, won't skip again next lap
+    expect(events.some((e) => e.type === "TURN_SKIPPED" && e.playerId === "p1")).toBe(true);
   });
 
   it("auctionOnDecline: declining a purchase starts an auction when ON, leaves it with the bank when OFF", () => {

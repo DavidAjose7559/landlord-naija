@@ -380,6 +380,14 @@ export function buildLines(
         push(event.seq, `${playerName(players, p.playerId)}'s turn timed out.`, { topLevel: true });
         break;
 
+      case "TURN_SKIPPED":
+        push(
+          event.seq,
+          `${playerName(players, p.playerId)} misses this turn — landed on ${spaceName(20)} last time.`,
+          { topLevel: true },
+        );
+        break;
+
       case "PROPERTIES_RETURNED_TO_MARKET":
         break; // folded into the PLAYER_BANKRUPT line above
 

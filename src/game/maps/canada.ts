@@ -1,5 +1,5 @@
 import { dollars } from "@/lib/money";
-import { makeCard, makeChoiceTax, makeProperty, makeTax, makeTransport, makeUtility } from "../board";
+import { makeCard, makeProperty, makeTax, makeTransport, makeUtility } from "../board";
 import type { Card } from "../cards";
 import type { GameMap, GameMapRegion } from "./types";
 
@@ -8,7 +8,7 @@ const spaces = [
   makeProperty(1, "Winnipeg", "brown", 60),
   makeCard(2, "Treasure", "treasure"),
   makeProperty(3, "Brandon", "brown", 60),
-  makeChoiceTax(4, "Income Tax", 200, 10),
+  makeTax(4, "Income Tax", 200),
   makeTransport(5, "VIA Rail", 200),
   makeProperty(6, "Regina", "lightblue", 100),
   makeCard(7, "Surprise", "surprise"),

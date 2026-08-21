@@ -23,7 +23,6 @@ const turnPhaseValues: [TurnPhase, ...TurnPhase[]] = [
   "awaiting_roll",
   "awaiting_purchase",
   "awaiting_auction",
-  "awaiting_tax_choice",
   "awaiting_payment",
   "awaiting_card",
   "awaiting_end_turn",

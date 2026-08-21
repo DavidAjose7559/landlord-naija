@@ -23,6 +23,7 @@ const createGameSchema = z
         randomizePlayerOrder: z.boolean(),
         doubleRentOnFullSet: z.boolean(),
         freeParkingCash: z.boolean(),
+        freeParkingSkipsTurn: z.boolean(),
         auctionOnDecline: z.boolean(),
         collectRentWhileJailed: z.boolean(),
         mortgageEnabled: z.boolean(),

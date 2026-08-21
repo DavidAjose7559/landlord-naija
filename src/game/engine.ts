@@ -64,7 +64,6 @@ export type GameAction =
   | { type: "SELL_HOUSE"; playerId: string; spaceIndex: number }
   | { type: "MORTGAGE"; playerId: string; spaceIndex: number }
   | { type: "UNMORTGAGE"; playerId: string; spaceIndex: number }
-  | { type: "CHOOSE_TAX"; playerId: string; option: "flat" | "percent" }
   | { type: "PAY_JAIL_FINE"; playerId: string }
   | { type: "USE_JAIL_FREE"; playerId: string }
   | { type: "END_TURN"; playerId: string }
@@ -119,6 +118,7 @@ export type GameEvent =
   | { type: "JAIL_ESCAPED"; playerId: string; method: "doubles" | "fine" | "forcedFine" | "card"; amount?: number }
   | { type: "TURN_ENDED"; playerId: string }
   | { type: "TURN_TIMED_OUT"; playerId: string }
+  | { type: "TURN_SKIPPED"; playerId: string }
   | { type: "PLAYER_BANKRUPT"; playerId: string; creditorId: string | "bank" }
   | { type: "PROPERTIES_RETURNED_TO_MARKET"; playerId: string }
   | { type: "GAME_OVER"; winnerPlayerId: string }
@@ -142,7 +142,6 @@ export function createInitialGameState(settings: GameSettings): GameState {
     winnerPlayerId: null,
     lastRoll: null,
     pendingCardDeck: null,
-    pendingTaxChoice: null,
     pendingDebt: null,
     pendingAuction: null,
     freeParkingPot: 0,
@@ -210,6 +209,28 @@ function nextActivePlayerIndex(players: PlayerState[], fromIndex: number): numbe
   return fromIndex;
 }
 
+// The single choke point every "this turn is over" path funnels through —
+// advances to the next active player and resets per-turn state. Centralized
+// so settings.freeParkingSkipsTurn's skip flag can never slip past it no
+// matter which of the several call sites ended the previous turn (a normal
+// END_TURN, a forced timeout, a jail-stuck roll, a bankruptcy mid-turn...).
+// Bounded to state.players.length iterations so a pathological all-players-
+// flagged state can't loop forever.
+function advanceTurn(state: GameState, events: GameEvent[]): void {
+  state.currentPlayerIndex = nextActivePlayerIndex(state.players, state.currentPlayerIndex);
+  state.doublesCount = 0;
+  state.lastRoll = null;
+  state.turnPhase = "awaiting_roll";
+
+  for (let guard = 0; guard < state.players.length; guard++) {
+    const next = currentPlayer(state);
+    if (!next.skipNextTurn) return;
+    next.skipNextTurn = false;
+    events.push({ type: "TURN_SKIPPED", playerId: next.id });
+    state.currentPlayerIndex = nextActivePlayerIndex(state.players, state.currentPlayerIndex);
+  }
+}
+
 // Whether the current player gets to roll again after this action resolves:
 // only true if the roll that's currently in flight was doubles.
 function nextPhaseAfterResolution(state: GameState): TurnPhase {
@@ -221,15 +242,10 @@ function nextPhaseAfterResolution(state: GameState): TurnPhase {
 
 // True while landing resolution has paused the turn on something that
 // needs its own action before anything else can proceed (a purchase
-// decision, a tax choice, raising cash for a debt, drawing a card).
+// decision, raising cash for a debt, drawing a card).
 function isPausingPhase(state: GameState): boolean {
   const phase = phaseOf(state);
-  return (
-    phase === "awaiting_purchase" ||
-    phase === "awaiting_tax_choice" ||
-    phase === "awaiting_payment" ||
-    phase === "awaiting_card"
-  );
+  return phase === "awaiting_purchase" || phase === "awaiting_payment" || phase === "awaiting_card";
 }
 
 // Exported for the property inspector (src/components/PropertyInspector.tsx)
@@ -391,6 +407,9 @@ function resolveLanding(state: GameState, player: PlayerState, events: GameEvent
         player.cashCents += amount;
         events.push({ type: "FREE_PARKING_PAID", playerId: player.id, amount });
       }
+      if (state.settings.freeParkingSkipsTurn) {
+        player.skipNextTurn = true;
+      }
       return;
     }
 
@@ -399,11 +418,6 @@ function resolveLanding(state: GameState, player: PlayerState, events: GameEvent
       return;
 
     case "tax": {
-      if (space.choice) {
-        state.turnPhase = "awaiting_tax_choice";
-        state.pendingTaxChoice = { spaceIndex: space.index };
-        return;
-      }
       chargeOrDefer(state, player, space.amount, "bank", "tax", events);
       if (state.turnPhase !== "awaiting_payment") {
         events.push({ type: "TAX_PAID", playerId: player.id, amount: space.amount, spaceIndex: space.index });
@@ -836,9 +850,7 @@ function resolveBankruptcy(
       events.push({ type: "GAME_OVER", winnerPlayerId: state.winnerPlayerId });
     }
   } else if (state.currentPlayerIndex === state.players.indexOf(player)) {
-    state.currentPlayerIndex = nextActivePlayerIndex(state.players, state.currentPlayerIndex);
-    state.turnPhase = "awaiting_roll";
-    state.doublesCount = 0;
+    advanceTurn(state, events);
   }
 }
 
@@ -1036,10 +1048,8 @@ function handleRoll(state: GameState, action: Extract<GameAction, { type: "ROLL"
       player.jailTurns = 0;
       events.push({ type: "JAIL_ESCAPED", playerId: player.id, method: "doubles" });
       // Explicitly no movement on a jail doubles-escape; the turn just ends.
-      state.doublesCount = 0;
-      state.currentPlayerIndex = nextActivePlayerIndex(state.players, state.currentPlayerIndex);
-      state.turnPhase = "awaiting_roll";
       events.push({ type: "TURN_ENDED", playerId: player.id });
+      advanceTurn(state, events);
       return;
     }
 
@@ -1059,10 +1069,8 @@ function handleRoll(state: GameState, action: Extract<GameAction, { type: "ROLL"
     }
 
     // Still stuck; turn ends without moving.
-    state.doublesCount = 0;
-    state.currentPlayerIndex = nextActivePlayerIndex(state.players, state.currentPlayerIndex);
-    state.turnPhase = "awaiting_roll";
     events.push({ type: "TURN_ENDED", playerId: player.id });
+    advanceTurn(state, events);
     return;
   }
 
@@ -1070,10 +1078,8 @@ function handleRoll(state: GameState, action: Extract<GameAction, { type: "ROLL"
     state.doublesCount += 1;
     if (state.doublesCount >= MAX_DOUBLES) {
       sendToJail(player, "rolled three doubles in a row", events);
-      state.doublesCount = 0;
-      state.currentPlayerIndex = nextActivePlayerIndex(state.players, state.currentPlayerIndex);
-      state.turnPhase = "awaiting_roll";
       events.push({ type: "TURN_ENDED", playerId: player.id });
+      advanceTurn(state, events);
       return;
     }
   } else {
@@ -1208,36 +1214,6 @@ function handlePassAuction(state: GameState, playerId: string, events: GameEvent
   } else {
     advanceAuctionTurn(state);
   }
-}
-
-// Resolves a choice tax space (e.g. Income Tax: flat $200 or 10% of net
-// worth, player's pick). netWorth is computed BEFORE any charge, same as
-// landing on it would see.
-function handleChooseTax(
-  state: GameState,
-  action: Extract<GameAction, { type: "CHOOSE_TAX" }>,
-  events: GameEvent[],
-): void {
-  const player = currentPlayer(state);
-  if (player.id !== action.playerId || state.turnPhase !== "awaiting_tax_choice" || !state.pendingTaxChoice) {
-    return;
-  }
-
-  const space = boardOf(state)[state.pendingTaxChoice.spaceIndex];
-  if (space.type !== "tax" || !space.choice) return;
-
-  const amount =
-    action.option === "flat"
-      ? space.choice.flatAmountCents
-      : Math.round((netWorth(state, player.id) * space.choice.percentOfNetWorth) / 100);
-
-  state.pendingTaxChoice = null;
-  state.turnPhase = "awaiting_end_turn"; // placeholder; chargeOrDefer overwrites if short
-  chargeOrDefer(state, player, amount, "bank", "tax", events);
-  if (phaseOf(state) === "awaiting_payment") return;
-
-  events.push({ type: "TAX_PAID", playerId: player.id, amount, spaceIndex: space.index });
-  state.turnPhase = nextPhaseAfterResolution(state);
 }
 
 // (Debt panel choice 2, "Help me raise it") Re-derives the same plan
@@ -1438,10 +1414,7 @@ function handleEndTurn(state: GameState, playerId: string, events: GameEvent[]):
   if (player.id !== playerId || state.turnPhase !== "awaiting_end_turn") return;
 
   events.push({ type: "TURN_ENDED", playerId });
-  state.currentPlayerIndex = nextActivePlayerIndex(state.players, state.currentPlayerIndex);
-  state.doublesCount = 0;
-  state.lastRoll = null;
-  state.turnPhase = "awaiting_roll";
+  advanceTurn(state, events);
 }
 
 // (settings.turnTimeLimitSeconds) Forces the current turn to end when the
@@ -1455,10 +1428,7 @@ function handleForceEndTurn(state: GameState, playerId: string, events: GameEven
   if (state.turnPhase !== "awaiting_roll" && state.turnPhase !== "awaiting_end_turn") return;
 
   events.push({ type: "TURN_TIMED_OUT", playerId });
-  state.currentPlayerIndex = nextActivePlayerIndex(state.players, state.currentPlayerIndex);
-  state.doublesCount = 0;
-  state.lastRoll = null;
-  state.turnPhase = "awaiting_roll";
+  advanceTurn(state, events);
 }
 
 // Host-only, lobby-only. Rejected outright once the game is active — settings
@@ -1613,9 +1583,6 @@ export function reduce(state: GameState, action: GameAction): { state: GameState
       break;
     case "UNMORTGAGE":
       handleUnmortgage(draft, action.playerId, action.spaceIndex, events);
-      break;
-    case "CHOOSE_TAX":
-      handleChooseTax(draft, action, events);
       break;
     case "PAY_JAIL_FINE":
       handlePayJailFine(draft, action.playerId, events);

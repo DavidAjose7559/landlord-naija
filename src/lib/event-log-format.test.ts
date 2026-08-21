@@ -28,6 +28,7 @@ function makePlayer(id: string, name: string, seatIndex: number, overrides: Part
     jailTurns: 0,
     jailFreeCards: 0,
     bankrupt: false,
+    skipNextTurn: false,
     ...overrides,
   };
 }
@@ -46,7 +47,6 @@ function makeState(players: PlayerState[], overrides: Partial<GameState> = {}): 
     winnerPlayerId: null,
     lastRoll: null,
     pendingCardDeck: null,
-    pendingTaxChoice: null,
     pendingDebt: null,
     pendingAuction: null,
     freeParkingPot: 0,
@@ -308,6 +308,18 @@ describe("event log vocabulary — WHO, WHAT, HOW MUCH", () => {
     });
     const bankrupt = run(state, { type: "DECLARE_BANKRUPT", playerId: "d" });
     expect(bankrupt.texts).toContain("Davido is bankrupt. Assets returned to the bank.");
+  });
+
+  it("a Free Parking skip names who missed their turn", () => {
+    const davido = makePlayer("d", "Davido", 0, { skipNextTurn: true });
+    const yinka = makePlayer("y", "Yinka", 1);
+    const state = makeState([davido, yinka], {
+      currentPlayerIndex: 1,
+      turnPhase: "awaiting_end_turn",
+      settings: { ...DEFAULT_SETTINGS, freeParkingSkipsTurn: true },
+    });
+    const ended = run(state, { type: "END_TURN", playerId: "y" });
+    expect(ended.texts).toContain(`Davido misses this turn — landed on ${MAPS.naija.freeParkingLabel} last time.`);
   });
 });
 

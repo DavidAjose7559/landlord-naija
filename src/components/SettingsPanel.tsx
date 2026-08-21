@@ -162,6 +162,20 @@ export function SettingsPanel({ game, isHost, roomCode, clientToken }: SettingsP
       />
 
       <SettingRow
+        icon="⏭️"
+        title="Free Parking skips a turn"
+        description="Landing there makes you miss your next turn"
+        isHost={isHost}
+        control={
+          <Toggle
+            checked={settings.freeParkingSkipsTurn}
+            disabled={!isHost || busy}
+            onChange={(v) => patch({ freeParkingSkipsTurn: v })}
+          />
+        }
+      />
+
+      <SettingRow
         icon="🔨"
         title="Auction declined properties"
         description="Off = a declined property just stays with the bank"

@@ -64,18 +64,14 @@ export interface CardSpace {
   deck: Deck;
 }
 
-// A tax space is either a flat charge, or (space 4 on every map) a choice
-// between a flat amount and a percentage of the payer's net worth — the
-// player picks at landing time (TurnPhase "awaiting_tax_choice").
+// (Section 2c) Both tax spaces are a flat, automatic charge — the old
+// flat-vs-percentage-of-net-worth choice on space 4 was removed entirely,
+// engine branch and UI both.
 export interface TaxSpace {
   index: number;
   name: string;
   type: "tax";
-  amount: number; // flat charge in cents; for a choice space, this is the flat option
-  choice?: {
-    flatAmountCents: number;
-    percentOfNetWorth: number; // e.g. 10 for 10%
-  };
+  amount: number; // flat charge in cents
 }
 
 export interface TransportSpace {
@@ -222,23 +218,6 @@ export function makeUtility(index: number, name: string, priceDollars: number): 
 // Space 38 on every map: a plain flat tax.
 export function makeTax(index: number, name: string, amountDollars: number): TaxSpace {
   return { index, name, type: "tax", amount: dollars(amountDollars) };
-}
-
-// Space 4 on every map: Income Tax, a flat-or-percent-of-net-worth choice.
-export function makeChoiceTax(
-  index: number,
-  name: string,
-  flatAmountDollars: number,
-  percentOfNetWorth: number,
-): TaxSpace {
-  const flatAmountCents = dollars(flatAmountDollars);
-  return {
-    index,
-    name,
-    type: "tax",
-    amount: flatAmountCents,
-    choice: { flatAmountCents, percentOfNetWorth },
-  };
 }
 
 export function makeCard(index: number, name: string, deck: Deck): CardSpace {

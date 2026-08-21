@@ -237,34 +237,30 @@ function JailBody({ state }: { state: GameState }) {
 
 function FreeParkingBody({ state }: { state: GameState }) {
   const map = MAPS[state.settings.mapId];
-  if (!state.settings.freeParkingCash) {
+  if (!state.settings.freeParkingCash && !state.settings.freeParkingSkipsTurn) {
     return <p className="text-sm text-ink">Just a rest stop — nothing happens when you land here.</p>;
   }
   return (
-    <p className="text-sm text-ink">
-      Tax and bank payments pool up here. Land on {map.freeParkingLabel} and you collect the whole pot — currently{" "}
-      <Money cents={state.freeParkingPot} />.
-    </p>
+    <div className="flex flex-col gap-2 text-sm text-ink">
+      {state.settings.freeParkingCash && (
+        <p>
+          Tax and bank payments pool up here. Land on {map.freeParkingLabel} and you collect the whole pot —
+          currently <Money cents={state.freeParkingPot} />.
+        </p>
+      )}
+      {state.settings.freeParkingSkipsTurn && <p>Landing here means you miss your next turn.</p>}
+    </div>
   );
 }
 
 function TaxBody({ state, space }: { state: GameState; space: TaxSpace }) {
   return (
     <div className="flex flex-col gap-2 text-sm text-ink">
-      {space.choice ? (
-        <p>
-          Pay <Money cents={space.choice.flatAmountCents} /> flat, or {space.choice.percentOfNetWorth}% of your net
-          worth — your choice when you land here.
-        </p>
-      ) : (
-        <p>
-          Pay <Money cents={space.amount} /> to the bank when you land here.
-        </p>
-      )}
+      <p>
+        Pay <Money cents={space.amount} /> to the bank when you land here.
+      </p>
       {state.settings.freeParkingCash && (
-        <p className="text-xs text-muted">
-          {space.choice ? "The flat option adds" : "This adds"} to the Free Parking pot instead of vanishing.
-        </p>
+        <p className="text-xs text-muted">This adds to the Free Parking pot instead of vanishing.</p>
       )}
     </div>
   );

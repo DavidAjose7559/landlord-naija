@@ -67,6 +67,7 @@ export async function POST(request: Request, context: { params: Promise<{ code: 
       jailTurns: 0,
       jailFreeCards: 0,
       bankrupt: false,
+      skipNextTurn: false,
     };
 
     // The first player to join becomes host (see UPDATE_SETTINGS /
