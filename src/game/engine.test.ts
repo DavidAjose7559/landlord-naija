@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MAPS } from "./maps";
 import { rollFor } from "./dice";
-import { netWorth, reduce, type GameAction } from "./engine";
+import { computeDebtReliefPlan, netWorth, reduce, type GameAction } from "./engine";
 import { DEFAULT_SETTINGS, type GameState, type PlayerState, type PlayerToken } from "./types";
 
 const BOARD = MAPS.naija.spaces;
@@ -639,5 +639,129 @@ describe("settings", () => {
       expect(events).toHaveLength(0);
       expect(next.settings.maxPlayers).toBe(DEFAULT_SETTINGS.maxPlayers);
     });
+  });
+});
+
+// Section C: debt never auto-liquidates anything. The engine only freezes
+// the turn (awaiting_payment) and, on request, previews/executes a
+// specific minimum-pain liquidation order — it never silently sells or
+// mortgages anything on its own.
+describe("debt relief", () => {
+  it("computeDebtReliefPlan: mortgages the cheapest bare property first when that alone covers the debt", () => {
+    const state = makeState([makePlayer("p1", 0, { cashCents: 0 })], {
+      turnPhase: "awaiting_payment",
+      pendingDebt: { amount: BOARD[1].type === "property" ? BOARD[1].mortgageValue : 0, creditorId: "bank", reason: "tax" },
+      ownership: {
+        1: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false }, // Agege $50 — cheaper
+        3: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false }, // Mushin $55
+      },
+    });
+    const plan = computeDebtReliefPlan(state, "p1");
+    expect(plan.sufficient).toBe(true);
+    expect(plan.operations).toEqual([{ type: "mortgage", spaceIndex: 1 }]);
+  });
+
+  it("computeDebtReliefPlan: never sells a house while an unmortgaged bare property still exists", () => {
+    const state = makeState([makePlayer("p1", 0, { cashCents: 0 })], {
+      turnPhase: "awaiting_payment",
+      pendingDebt: { amount: 1_000_000, creditorId: "bank", reason: "tax" }, // deliberately unreachable
+      ownership: {
+        37: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false }, // bare — Banana Island
+        6: { ownerId: "p1", houses: 3, hotel: false, mortgaged: false },
+        8: { ownerId: "p1", houses: 3, hotel: false, mortgaged: false },
+        9: { ownerId: "p1", houses: 3, hotel: false, mortgaged: false },
+      },
+    });
+    const plan = computeDebtReliefPlan(state, "p1");
+    const bareMortgageIndex = plan.operations.findIndex((op) => op.type === "mortgage" && op.spaceIndex === 37);
+    const firstSellIndex = plan.operations.findIndex((op) => op.type === "sellHouse");
+    expect(bareMortgageIndex).toBeGreaterThanOrEqual(0);
+    expect(firstSellIndex).toBeGreaterThan(bareMortgageIndex);
+  });
+
+  it("computeDebtReliefPlan: sells houses before ever touching a hotel-holding group", () => {
+    const state = makeState([makePlayer("p1", 0, { cashCents: 0 })], {
+      turnPhase: "awaiting_payment",
+      pendingDebt: { amount: 100_000, creditorId: "bank", reason: "tax" },
+      ownership: {
+        11: { ownerId: "p1", houses: 2, hotel: false, mortgaged: false },
+        13: { ownerId: "p1", houses: 2, hotel: false, mortgaged: false },
+        14: { ownerId: "p1", houses: 2, hotel: false, mortgaged: false },
+        1: { ownerId: "p1", houses: 0, hotel: true, mortgaged: false },
+        3: { ownerId: "p1", houses: 0, hotel: true, mortgaged: false },
+      },
+    });
+    const plan = computeDebtReliefPlan(state, "p1");
+    const firstHotelTouch = plan.operations.findIndex(
+      (op) => op.type === "sellHouse" && (op.spaceIndex === 1 || op.spaceIndex === 3),
+    );
+    const lastPinkTouch = plan.operations.reduce(
+      (last, op, i) => (op.type === "sellHouse" && [11, 13, 14].includes(op.spaceIndex) ? i : last),
+      -1,
+    );
+    expect(firstHotelTouch).toBeGreaterThan(lastPinkTouch);
+  });
+
+  it("computeDebtReliefPlan: reports insufficient when even full liquidation can't cover the debt", () => {
+    const state = makeState([makePlayer("p1", 0, { cashCents: 0 })], {
+      turnPhase: "awaiting_payment",
+      pendingDebt: { amount: 999_999_999, creditorId: "bank", reason: "tax" },
+      ownership: { 1: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false } },
+    });
+    const plan = computeDebtReliefPlan(state, "p1");
+    expect(plan.sufficient).toBe(false);
+  });
+
+  it("RAISE_DEBT_HELP: applies the plan for real, raising cash without auto-paying the debt", () => {
+    const debtAmount = BOARD[1].type === "property" ? BOARD[1].mortgageValue : 0;
+    const state = makeState([makePlayer("p1", 0, { cashCents: 0 })], {
+      turnPhase: "awaiting_payment",
+      pendingDebt: { amount: debtAmount, creditorId: "bank", reason: "tax" },
+      ownership: { 1: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false } },
+    });
+    const { state: next, events } = reduce(state, { type: "RAISE_DEBT_HELP", playerId: "p1" });
+    expect(next.ownership[1].mortgaged).toBe(true);
+    expect(next.players[0].cashCents).toBeGreaterThanOrEqual(debtAmount);
+    expect(next.turnPhase).toBe("awaiting_payment"); // still needs an explicit PAY_RENT
+    expect(next.pendingDebt).not.toBeNull();
+    expect(events.some((e) => e.type === "DEBT_RELIEF_APPLIED")).toBe(true);
+
+    const { state: afterPay } = reduce(next, { type: "PAY_RENT", playerId: "p1" });
+    expect(afterPay.pendingDebt).toBeNull();
+  });
+
+  it("RAISE_DEBT_HELP: no-op when even full liquidation can't cover the debt", () => {
+    const state = makeState([makePlayer("p1", 0, { cashCents: 0 })], {
+      turnPhase: "awaiting_payment",
+      pendingDebt: { amount: 999_999_999, creditorId: "bank", reason: "tax" },
+      ownership: { 1: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false } },
+    });
+    const { state: next, events } = reduce(state, { type: "RAISE_DEBT_HELP", playerId: "p1" });
+    expect(next.ownership[1].mortgaged).toBe(false);
+    expect(events).toHaveLength(0);
+  });
+
+  it("SELL_HOUSE works during awaiting_payment so a debtor can raise cash manually", () => {
+    const state = makeState([makePlayer("p1", 0, { cashCents: 0 })], {
+      turnPhase: "awaiting_payment",
+      pendingDebt: { amount: 1, creditorId: "bank", reason: "tax" },
+      ownership: {
+        1: { ownerId: "p1", houses: 1, hotel: false, mortgaged: false },
+        3: { ownerId: "p1", houses: 1, hotel: false, mortgaged: false },
+      },
+    });
+    const { state: next, events } = reduce(state, { type: "SELL_HOUSE", playerId: "p1", spaceIndex: 1 });
+    expect(next.ownership[1].houses).toBe(0);
+    expect(events.some((e) => e.type === "HOUSE_SOLD")).toBe(true);
+  });
+
+  it("manual bankruptcy stays available mid-debt regardless of allowManualBankruptcy", () => {
+    const state = makeState([makePlayer("p1", 0, { cashCents: 0 }), makePlayer("p2", 1)], {
+      turnPhase: "awaiting_payment",
+      pendingDebt: { amount: 999_999_999, creditorId: "p2", reason: "rent" },
+      settings: { ...DEFAULT_SETTINGS, allowManualBankruptcy: false },
+    });
+    const { state: next } = reduce(state, { type: "DECLARE_BANKRUPT", playerId: "p1" });
+    expect(next.players[0].bankrupt).toBe(true);
   });
 });

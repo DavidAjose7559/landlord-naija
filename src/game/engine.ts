@@ -58,6 +58,7 @@ export type GameAction =
   | { type: "PLACE_BID"; playerId: string; amount: number }
   | { type: "PASS_AUCTION"; playerId: string }
   | { type: "PAY_RENT"; playerId: string }
+  | { type: "RAISE_DEBT_HELP"; playerId: string }
   | { type: "DRAW_CARD"; playerId: string; cardId: string }
   | { type: "BUILD_HOUSE"; playerId: string; spaceIndex: number }
   | { type: "SELL_HOUSE"; playerId: string; spaceIndex: number }
@@ -101,6 +102,7 @@ export type GameEvent =
   | { type: "HOUSE_SOLD"; playerId: string; spaceIndex: number; houses: number; hotel: boolean }
   | { type: "MORTGAGED"; playerId: string; spaceIndex: number }
   | { type: "UNMORTGAGED"; playerId: string; spaceIndex: number }
+  | { type: "DEBT_RELIEF_APPLIED"; playerId: string; operations: DebtReliefOperation[] }
   | { type: "SENT_TO_JAIL"; playerId: string; reason: string }
   | { type: "JAIL_ESCAPED"; playerId: string; method: "doubles" | "fine" | "card" }
   | { type: "TURN_ENDED"; playerId: string }
@@ -713,6 +715,124 @@ export function netWorth(state: GameState, playerId: string): number {
 }
 
 // ============================================================================
+// debt relief ("Help me raise it")
+// ============================================================================
+
+export interface DebtReliefOperation {
+  type: "mortgage" | "sellHouse";
+  spaceIndex: number;
+}
+
+export interface DebtReliefPlan {
+  operations: DebtReliefOperation[];
+  projectedCashCents: number;
+  sufficient: boolean;
+}
+
+// Simulates the minimum-pain liquidation order the spec calls for, on a
+// scratch clone — never mutates the real state. Strict priority: mortgage
+// bare (houseless, unmortgaged) properties cheapest-first; only once
+// mortgaging every bare property still isn't enough, sell houses
+// (respecting evenBuild) from the largest-invested colour group down,
+// hotel-holding groups last; only if that's still not enough, mortgage the
+// properties step 2 just made bare. This ordering is what guarantees a
+// house is never sold while an unmortgaged bare property still exists —
+// step 1 only stops early (minimum pain) when it alone already covers the
+// debt; otherwise it exhausts every bare property before step 2 runs at
+// all. The caller (handleRaiseDebtHelp) re-derives and applies this same
+// plan for real only once the player has confirmed it.
+export function computeDebtReliefPlan(state: GameState, playerId: string): DebtReliefPlan {
+  const player = findPlayer(state, playerId);
+  const debt = state.pendingDebt?.amount ?? 0;
+  if (!player) return { operations: [], projectedCashCents: 0, sufficient: false };
+
+  const scratch = structuredClone(state);
+  const scratchPlayer = findPlayer(scratch, playerId)!;
+  const operations: DebtReliefOperation[] = [];
+
+  function bareUnmortgagedCheapestFirst(): number[] {
+    return Object.entries(scratch.ownership)
+      .filter(([, own]) => own.ownerId === playerId && !own.mortgaged && own.houses === 0 && !own.hotel)
+      .map(([idx]) => Number(idx))
+      .sort((a, b) => getMortgageableSpace(scratch, a)!.mortgageValue - getMortgageableSpace(scratch, b)!.mortgageValue);
+  }
+
+  function mortgageOne(idx: number): void {
+    const space = getMortgageableSpace(scratch, idx)!;
+    scratch.ownership[idx].mortgaged = true;
+    scratchPlayer.cashCents += space.mortgageValue;
+    operations.push({ type: "mortgage", spaceIndex: idx });
+  }
+
+  const allBare = bareUnmortgagedCheapestFirst();
+  const bareTotal = allBare.reduce((sum, idx) => sum + getMortgageableSpace(scratch, idx)!.mortgageValue, 0);
+
+  if (scratchPlayer.cashCents + bareTotal >= debt) {
+    for (const idx of allBare) {
+      if (scratchPlayer.cashCents >= debt) break;
+      mortgageOne(idx);
+    }
+  } else {
+    for (const idx of allBare) mortgageOne(idx);
+
+    const board = boardOf(scratch);
+    const colorGroups = new Map<ColorGroup, number[]>();
+    for (const [idxStr, own] of Object.entries(scratch.ownership)) {
+      if (own.ownerId !== playerId) continue;
+      const idx = Number(idxStr);
+      const space = board[idx];
+      if (space.type !== "property" || (own.houses === 0 && !own.hotel)) continue;
+      const list = colorGroups.get(space.color) ?? [];
+      list.push(idx);
+      colorGroups.set(space.color, list);
+    }
+
+    const investment = (indexes: number[]) =>
+      indexes.reduce((sum, idx) => sum + (scratch.ownership[idx].hotel ? 5 : scratch.ownership[idx].houses), 0);
+    const hasHotel = (indexes: number[]) => indexes.some((idx) => scratch.ownership[idx].hotel);
+
+    const orderedGroups = [...colorGroups.values()].sort((a, b) => {
+      const aHotel = hasHotel(a) ? 1 : 0;
+      const bHotel = hasHotel(b) ? 1 : 0;
+      if (aHotel !== bHotel) return aHotel - bHotel; // hotel-holding groups sell last
+      return investment(b) - investment(a); // largest-invested group first
+    });
+
+    for (const groupIndexes of orderedGroups) {
+      while (scratchPlayer.cashCents < debt) {
+        const sellable = groupIndexes.filter((idx) => canSellHouse(scratch, playerId, idx));
+        if (sellable.length === 0) break;
+        const target = sellable[0]; // canSellHouse already enforces even-sell (max level first)
+        const space = board[target] as PropertySpace;
+        const own = scratch.ownership[target];
+        scratchPlayer.cashCents += Math.floor(space.houseCost / 2);
+        if (own.hotel) {
+          own.hotel = false;
+          own.houses = 4;
+        } else {
+          own.houses -= 1;
+        }
+        operations.push({ type: "sellHouse", spaceIndex: target });
+      }
+      if (scratchPlayer.cashCents >= debt) break;
+    }
+
+    if (scratchPlayer.cashCents < debt) {
+      for (const idx of bareUnmortgagedCheapestFirst()) {
+        if (scratchPlayer.cashCents >= debt) break;
+        mortgageOne(idx);
+      }
+    }
+  }
+
+  return {
+    operations,
+    projectedCashCents: scratchPlayer.cashCents,
+    sufficient: scratchPlayer.cashCents >= debt,
+  };
+}
+
+// ============================================================================
 // action handlers
 // ============================================================================
 
@@ -934,6 +1054,29 @@ function handleChooseTax(
   state.turnPhase = nextPhaseAfterResolution(state);
 }
 
+// (Debt panel choice 2, "Help me raise it") Re-derives the same plan
+// computeDebtReliefPlan would preview and applies it for real — mortgaging
+// and selling houses through the normal handlers so events/invariants stay
+// identical to a player doing it manually. Only raises cash; the player
+// still has to PAY_RENT afterward (same as choice 1), so a stale/insincere
+// plan can never silently pay a debt the player didn't confirm.
+function handleRaiseDebtHelp(state: GameState, playerId: string, events: GameEvent[]): void {
+  if (state.turnPhase !== "awaiting_payment" || !state.pendingDebt) return;
+  if (currentPlayer(state).id !== playerId) return;
+
+  const plan = computeDebtReliefPlan(state, playerId);
+  if (!plan.sufficient || plan.operations.length === 0) return;
+
+  for (const op of plan.operations) {
+    if (op.type === "mortgage") {
+      handleMortgage(state, playerId, op.spaceIndex, events);
+    } else {
+      handleSellHouse(state, playerId, op.spaceIndex, events);
+    }
+  }
+  events.push({ type: "DEBT_RELIEF_APPLIED", playerId, operations: plan.operations });
+}
+
 function handlePayRent(state: GameState, playerId: string, events: GameEvent[]): void {
   const player = findPlayer(state, playerId);
   if (!player || state.turnPhase !== "awaiting_payment" || !state.pendingDebt) return;
@@ -1007,7 +1150,12 @@ function handleBuildHouse(state: GameState, playerId: string, spaceIndex: number
 function handleSellHouse(state: GameState, playerId: string, spaceIndex: number, events: GameEvent[]): void {
   const player = currentPlayer(state);
   if (player.id !== playerId) return;
-  if (state.turnPhase !== "awaiting_roll" && state.turnPhase !== "awaiting_end_turn") return;
+  // awaiting_payment is included so a debtor can sell houses to raise cash
+  // (see computeDebtReliefPlan/"Raise it myself") — building new houses
+  // mid-debt stays disallowed (see handleBuildHouse), only unwinding does.
+  if (state.turnPhase !== "awaiting_roll" && state.turnPhase !== "awaiting_end_turn" && state.turnPhase !== "awaiting_payment") {
+    return;
+  }
   if (!canSellHouse(state, playerId, spaceIndex)) return;
 
   const space = boardOf(state)[spaceIndex] as PropertySpace;
@@ -1237,6 +1385,9 @@ export function reduce(state: GameState, action: GameAction): { state: GameState
       break;
     case "PAY_RENT":
       handlePayRent(draft, action.playerId, events);
+      break;
+    case "RAISE_DEBT_HELP":
+      handleRaiseDebtHelp(draft, action.playerId, events);
       break;
     case "DRAW_CARD":
       handleDrawCard(draft, action, events);

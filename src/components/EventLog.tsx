@@ -94,6 +94,28 @@ function describeEvent(
       return "A trade was accepted.";
     case "TRADE_DECLINED":
       return "A trade was declined.";
+    case "TRADE_REJECTED":
+      return `That trade fell through: ${String(p.reason)}.`;
+    case "SETTINGS_UPDATED":
+      return "The host changed the game settings.";
+    case "AUCTION_STARTED":
+      return `${spaceName(p.spaceIndex)} is up for auction.`;
+    case "BID_PLACED":
+      return `${playerName(players, p.playerId)} bid ${formatCAD(Number(p.amount))}.`;
+    case "AUCTION_PASSED":
+      return `${playerName(players, p.playerId)} passed on the auction.`;
+    case "AUCTION_WON":
+      return `${playerName(players, p.playerId)} won ${spaceName(p.spaceIndex)} at auction for ${formatCAD(Number(p.amount))}.`;
+    case "AUCTION_ENDED_NO_WINNER":
+      return `The auction for ${spaceName(p.spaceIndex)} ended with no bids — it stays with the bank.`;
+    case "FREE_PARKING_PAID":
+      return `${playerName(players, p.playerId)} collected the Free Parking jackpot: ${formatCAD(Number(p.amount))}.`;
+    case "TURN_TIMED_OUT":
+      return `${playerName(players, p.playerId)}'s turn timed out.`;
+    case "PROPERTIES_RETURNED_TO_MARKET":
+      return `${playerName(players, p.playerId)}'s properties have returned to the market.`;
+    case "DEBT_RELIEF_APPLIED":
+      return `${playerName(players, p.playerId)} raised cash to cover their debt.`;
     default:
       return null;
   }

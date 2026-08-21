@@ -163,6 +163,7 @@ async function resolveConcreteAction(
     case "DECLINE_BUY":
     case "PASS_AUCTION":
     case "PAY_RENT":
+    case "RAISE_DEBT_HELP":
     case "PAY_JAIL_FINE":
     case "USE_JAIL_FREE":
     case "END_TURN":

@@ -27,6 +27,7 @@ export const clientActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("PLACE_BID"), amount: z.number().int().positive() }).strict(),
   z.object({ type: z.literal("PASS_AUCTION") }).strict(),
   z.object({ type: z.literal("PAY_RENT") }).strict(),
+  z.object({ type: z.literal("RAISE_DEBT_HELP") }).strict(),
   z.object({ type: z.literal("DRAW_CARD") }).strict(),
   z.object({ type: z.literal("BUILD_HOUSE"), spaceIndex: spaceIndexSchema }).strict(),
   z.object({ type: z.literal("SELL_HOUSE"), spaceIndex: spaceIndexSchema }).strict(),

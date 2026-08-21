@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import type { Deck } from "@/game/board";
-import { netWorth } from "@/game/engine";
+import { computeDebtReliefPlan, netWorth } from "@/game/engine";
 import { MAPS } from "@/game/maps";
+import type { PlayerState } from "@/game/types";
 import type { ClientAction } from "@/lib/api/client-action";
 import type { PublicGame } from "@/lib/api/public-game";
 import { formatCAD } from "@/lib/money";
@@ -65,11 +66,18 @@ export function ActionBar({ game, session, dispatch }: ActionBarProps) {
     }
   }
 
-  if (!me || me.bankrupt) return null;
+  const debtor =
+    game.turnPhase === "awaiting_payment" ? game.state.players[game.state.currentPlayerIndex] : undefined;
+
+  if (!me) return null;
 
   return (
     <div className="flex flex-col gap-3">
-      {drawnCard && (
+      {game.status === "active" && game.state.settings.allowManualBankruptcy && !me.bankrupt && (
+        <ManualBankruptcyButton busy={busy} act={act} />
+      )}
+
+      {!me.bankrupt && drawnCard && (
         <div className={`flex flex-col gap-3 rounded-2xl p-5 ${DECK_STYLE[drawnCard.deck]}`}>
           <span className="text-xs font-semibold tracking-widest uppercase opacity-80">
             {map.deckLabels[drawnCard.deck]}
@@ -85,8 +93,25 @@ export function ActionBar({ game, session, dispatch }: ActionBarProps) {
         </div>
       )}
 
-      {!isMyTurn ? (
-        <p className="text-center text-sm text-muted">Waiting for your turn…</p>
+      {!me.bankrupt && game.turnPhase === "awaiting_payment" && !isMyTurn && debtor && (
+        <p className="text-center text-sm text-muted">Waiting for {debtor.name} to settle a debt.</p>
+      )}
+
+      {!me.bankrupt && game.turnPhase === "awaiting_auction" && game.state.pendingAuction && (
+        <>
+          {game.state.pendingAuction.turnPlayerId === me.id ? (
+            <AuctionPrompt game={game} me={me} busy={busy} act={act} />
+          ) : (
+            <p className="text-center text-sm text-muted">
+              Waiting for {game.state.players.find((p) => p.id === game.state.pendingAuction?.turnPlayerId)?.name} to
+              bid or pass…
+            </p>
+          )}
+        </>
+      )}
+
+      {me.bankrupt || game.turnPhase === "awaiting_auction" ? null : !isMyTurn ? (
+        game.turnPhase !== "awaiting_payment" && <p className="text-center text-sm text-muted">Waiting for your turn…</p>
       ) : (
         <>
           {me.inJail && game.turnPhase === "awaiting_roll" && (
@@ -124,31 +149,7 @@ export function ActionBar({ game, session, dispatch }: ActionBarProps) {
           )}
 
           {game.turnPhase === "awaiting_payment" && game.state.pendingDebt && (
-            <div className="flex flex-col gap-3 rounded-2xl bg-surface px-4 py-4">
-              <p className="text-sm text-ink">
-                You owe <span className="font-semibold">{formatCAD(game.state.pendingDebt.amount)}</span>
-                {game.state.pendingDebt.reason === "rent" ? " in rent" : game.state.pendingDebt.reason === "tax" ? " in tax" : ""}.
-                {me.cashCents < game.state.pendingDebt.amount && " Mortgage or sell a house to raise cash first."}
-              </p>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  disabled={busy || me.cashCents < game.state.pendingDebt.amount}
-                  onClick={() => act({ type: "PAY_RENT" })}
-                  className="flex-1 rounded-full bg-accent px-4 py-2.5 text-sm font-semibold text-accent-foreground disabled:opacity-40"
-                >
-                  Pay {formatCAD(game.state.pendingDebt.amount)}
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => act({ type: "DECLARE_BANKRUPT" })}
-                  className="rounded-full bg-danger/20 px-4 py-2.5 text-sm font-semibold text-danger disabled:opacity-40"
-                >
-                  Declare bankrupt
-                </button>
-              </div>
-            </div>
+            <DebtPanel game={game} me={me} busy={busy} act={act} />
           )}
 
           {game.turnPhase === "awaiting_card" && !drawnCard && (
@@ -260,6 +261,249 @@ function TaxChoicePrompt({
           className="flex-1 rounded-full bg-surface-2 px-4 py-2.5 text-sm font-semibold text-ink disabled:opacity-40"
         >
           Pay {space.choice.percentOfNetWorth}% ({formatCAD(percentAmount)})
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// The debt panel: never auto-liquidates anything. Choice 1 ("raise it
+// myself") is just closing this and using the normal mortgage/sell-house
+// buttons in PlayerPanel — those already work mid-debt (see
+// handleSellHouse's phase gate). Choice 2 previews computeDebtReliefPlan's
+// minimum-pain liquidation before doing anything. Choice 3 is always
+// available here regardless of allowManualBankruptcy — being unable to
+// cover a debt is exactly the "truly unable" case the spec carves out.
+function DebtPanel({
+  game,
+  me,
+  busy,
+  act,
+}: {
+  game: PublicGame;
+  me: PlayerState;
+  busy: boolean;
+  act: (action: ClientAction) => Promise<{ ok: boolean; reason?: string } | null>;
+}) {
+  const [showPlan, setShowPlan] = useState(false);
+  const debt = game.state.pendingDebt;
+  if (!debt) return null;
+
+  const spaces = MAPS[game.state.settings.mapId].spaces;
+  const creditorName =
+    debt.creditorId === "bank" ? "the bank" : (game.state.players.find((p) => p.id === debt.creditorId)?.name ?? "the bank");
+  const shortfall = Math.max(0, debt.amount - me.cashCents);
+  const plan = shortfall > 0 ? computeDebtReliefPlan(game.state, me.id) : null;
+
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl bg-surface px-4 py-4">
+      <div className="flex flex-col gap-1 text-sm text-ink">
+        <p>
+          You owe <span className="font-semibold">{formatCAD(debt.amount)}</span> to{" "}
+          <span className="font-semibold">{creditorName}</span>.
+        </p>
+        <p className="text-xs text-muted">
+          Cash on hand: {formatCAD(me.cashCents)}
+          {shortfall > 0 && <> · short by {formatCAD(shortfall)}</>}
+        </p>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={busy || me.cashCents < debt.amount}
+          onClick={() => act({ type: "PAY_RENT" })}
+          className="flex-1 rounded-full bg-accent px-4 py-2.5 text-sm font-semibold text-accent-foreground disabled:opacity-40"
+        >
+          Pay {formatCAD(debt.amount)}
+        </button>
+        {shortfall > 0 && plan?.sufficient && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setShowPlan(true)}
+            className="flex-1 rounded-full bg-surface-2 px-4 py-2.5 text-sm font-semibold text-ink disabled:opacity-40"
+          >
+            Help me raise it
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => act({ type: "DECLARE_BANKRUPT" })}
+          className="rounded-full bg-danger/20 px-4 py-2.5 text-sm font-semibold text-danger disabled:opacity-40"
+        >
+          Declare bankrupt
+        </button>
+      </div>
+
+      {showPlan && plan && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="flex w-full max-w-sm flex-col gap-3 rounded-2xl bg-surface p-6">
+            <h3 className="text-base font-bold text-ink">Raise {formatCAD(shortfall)} automatically?</h3>
+            <p className="text-sm text-ink">
+              This will{" "}
+              {plan.operations
+                .map((op) =>
+                  op.type === "mortgage" ? `mortgage ${spaces[op.spaceIndex].name}` : `sell a house on ${spaces[op.spaceIndex].name}`,
+                )
+                .join(", ")}
+              .
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={async () => {
+                  const result = await act({ type: "RAISE_DEBT_HELP" });
+                  if (result?.ok) setShowPlan(false);
+                }}
+                className="flex-1 rounded-full bg-accent px-4 py-2.5 text-sm font-semibold text-accent-foreground disabled:opacity-40"
+              >
+                Confirm
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowPlan(false)}
+                className="flex-1 rounded-full bg-surface-2 px-4 py-2.5 text-sm font-semibold text-ink"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AuctionPrompt({
+  game,
+  me,
+  busy,
+  act,
+}: {
+  game: PublicGame;
+  me: PlayerState;
+  busy: boolean;
+  act: (action: ClientAction) => Promise<{ ok: boolean; reason?: string } | null>;
+}) {
+  const auction = game.state.pendingAuction;
+  const [bidInput, setBidInput] = useState("");
+  if (!auction) return null;
+
+  const space = MAPS[game.state.settings.mapId].spaces[auction.spaceIndex];
+  const minBid = auction.highestBid + 100;
+
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl bg-surface px-4 py-4">
+      <p className="text-sm text-ink">
+        Auctioning <span className="font-semibold">{space.name}</span>.{" "}
+        {auction.highestBidderId ? (
+          <>
+            Current bid {formatCAD(auction.highestBid)} by{" "}
+            {game.state.players.find((p) => p.id === auction.highestBidderId)?.name}.
+          </>
+        ) : (
+          "No bids yet."
+        )}
+      </p>
+      <div className="flex gap-2">
+        <input
+          type="number"
+          min={minBid / 100}
+          step={1}
+          value={bidInput}
+          onChange={(e) => setBidInput(e.target.value)}
+          placeholder={formatCAD(minBid)}
+          className="w-28 rounded-full bg-surface-2 px-4 py-2 text-sm text-ink"
+        />
+        <button
+          type="button"
+          disabled={busy || !bidInput || Math.round(Number(bidInput) * 100) < minBid || Math.round(Number(bidInput) * 100) > me.cashCents}
+          onClick={async () => {
+            const amount = Math.round(Number(bidInput) * 100);
+            const result = await act({ type: "PLACE_BID", amount });
+            if (result?.ok) setBidInput("");
+          }}
+          className="flex-1 rounded-full bg-accent px-4 py-2.5 text-sm font-semibold text-accent-foreground disabled:opacity-40"
+        >
+          Bid
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => act({ type: "PASS_AUCTION" })}
+          className="rounded-full bg-surface-2 px-4 py-2.5 text-sm font-semibold text-ink disabled:opacity-40"
+        >
+          Pass
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Always visible whenever the room allows it, regardless of turn — a
+// player can walk away at any time. Two-step confirm ("type QUIT") since
+// this is irreversible and not gated behind any board state.
+function ManualBankruptcyButton({
+  busy,
+  act,
+}: {
+  busy: boolean;
+  act: (action: ClientAction) => Promise<{ ok: boolean; reason?: string } | null>;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+
+  if (!confirming) {
+    return (
+      <button
+        type="button"
+        onClick={() => setConfirming(true)}
+        className="self-end text-xs font-medium text-danger/70 hover:text-danger"
+      >
+        Quit &amp; declare bankruptcy
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-2xl bg-danger/10 px-4 py-3">
+      <p className="text-xs text-danger">
+        This ends your game permanently and can&apos;t be undone. Type <span className="font-semibold">QUIT</span> to
+        confirm.
+      </p>
+      <div className="flex gap-2">
+        <input
+          value={confirmText}
+          onChange={(e) => setConfirmText(e.target.value)}
+          placeholder="QUIT"
+          className="flex-1 rounded-full bg-surface px-4 py-2 text-sm text-ink"
+        />
+        <button
+          type="button"
+          disabled={busy || confirmText.trim().toUpperCase() !== "QUIT"}
+          onClick={async () => {
+            const result = await act({ type: "DECLARE_BANKRUPT" });
+            if (result?.ok) {
+              setConfirming(false);
+              setConfirmText("");
+            }
+          }}
+          className="rounded-full bg-danger px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+        >
+          Confirm
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setConfirming(false);
+            setConfirmText("");
+          }}
+          className="rounded-full bg-surface-2 px-4 py-2 text-sm font-semibold text-ink"
+        >
+          Cancel
         </button>
       </div>
     </div>
