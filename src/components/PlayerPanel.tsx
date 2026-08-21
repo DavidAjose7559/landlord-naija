@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { ColorGroup } from "@/game/board";
+import { buildHouseBlockedReason } from "@/game/engine";
 import { MAPS } from "@/game/maps";
 import type { PlayerState } from "@/game/types";
 import type { ClientAction } from "@/lib/api/client-action";
@@ -150,14 +151,20 @@ function Portfolio({
               </span>
               {space.houseCost !== null && !space.mortgaged && (
                 <>
-                  <button
-                    type="button"
-                    disabled={busySpace === space.index}
-                    onClick={() => onAct({ type: "BUILD_HOUSE", spaceIndex: space.index }, space.index)}
-                    className="rounded-full bg-accent/20 px-2.5 py-1 font-medium text-accent hover:bg-accent/30 disabled:opacity-40"
-                  >
-                    Build
-                  </button>
+                  {(() => {
+                    const blockedReason = buildHouseBlockedReason(game.state, player.id, space.index);
+                    return (
+                      <button
+                        type="button"
+                        disabled={busySpace === space.index || blockedReason !== null}
+                        title={blockedReason ?? undefined}
+                        onClick={() => onAct({ type: "BUILD_HOUSE", spaceIndex: space.index }, space.index)}
+                        className="rounded-full bg-accent/20 px-2.5 py-1 font-medium text-accent hover:bg-accent/30 disabled:opacity-40"
+                      >
+                        Build
+                      </button>
+                    );
+                  })()}
                   {(space.houses > 0 || space.hotel) && (
                     <button
                       type="button"

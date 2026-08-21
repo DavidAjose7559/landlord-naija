@@ -53,8 +53,39 @@ indication why — a genuine, if unusual, product risk.
 `.../trades/[tradeId]/negotiate` (and updated TradePanel.tsx's fetch call
 to match) — same behavior, a path word blocklists don't target.
 
-**Status:** fixing now; will re-verify against the live deployment once
-redeployed.
+**Status:** fixed and re-verified against the live deployment after
+redeploying.
+
+## 4. Illegal build attempts only ever say "action had no effect"
+
+**Repro:** Own a full unmortgaged region with `evenBuild` on, build a house
+on one property, then try to build a *second* house on that same property
+before the others in the region have any. The engine correctly rejects it
+(no state change), but the API's blanket fallback for any rejected action
+is the generic "action had no effect" — not specific to the even-build
+rule, or to any other rejection reason across the whole app.
+
+**Root cause:** `canBuildHouse` (and every other `can*`/`handle*` validity
+check in the engine) only ever returns a boolean or silently no-ops —
+there's no channel for a specific rejection reason to reach the client.
+Fixing this for every action type would be a much larger change than this
+pass has room for.
+
+**Fix (scoped to what the scenario actually named):** new exported
+`buildHouseBlockedReason(state, playerId, spaceIndex)` — pure, no secrets,
+same pattern as `netWorth`/`computeDebtReliefPlan` — returns a specific
+human reason or `null`. PlayerPanel's Build button now disables itself
+with that reason as a tooltip *before* the player can click into a no-op,
+rather than reacting to a vague error after the fact.
+
+**Not fixed, flagging honestly:** every other action type (mortgage, buy,
+pay rent, jail actions, etc.) still only surfaces "action had no effect"
+on rejection. None of those came up as confusing in this pass — they're
+all either clearly unavailable in the UI already (buttons don't render
+when the action wouldn't apply) or straightforward enough that the
+generic message is adequate — but it's the same underlying gap, just not
+severe enough elsewhere to warrant the same treatment under this pass's
+time budget.
 
 ## Notes (not bugs)
 

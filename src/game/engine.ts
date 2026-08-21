@@ -581,6 +581,37 @@ function totalHotelsInPlay(state: GameState): number {
   return total;
 }
 
+// (Section H finding) canBuildHouse only ever returns a boolean, and a
+// rejected BUILD_HOUSE surfaces as the API's generic "action had no
+// effect" — which technically never lies, but isn't the "clear message"
+// the even-build rule specifically calls for. This gives the UI a
+// human reason to show *before* dispatching, so an illegal build is a
+// disabled button with an explanation rather than a silent no-op.
+// Pure/no secrets — safe to import client-side, same as netWorth.
+export function buildHouseBlockedReason(state: GameState, playerId: string, spaceIndex: number): string | null {
+  const space = boardOf(state)[spaceIndex];
+  if (space.type !== "property") return "Not a buildable property.";
+  const own = state.ownership[spaceIndex];
+  if (!own || own.ownerId !== playerId) return "You don't own this.";
+  if (own.mortgaged) return "Unmortgage this first.";
+  if (own.hotel) return "Already has a hotel.";
+  if (!ownsFullUnmortgagedGroup(state, playerId, space.color)) {
+    return "You need to own the whole region, unmortgaged, first.";
+  }
+
+  const group = ownedPropertyIndexesInGroup(state, space.color);
+  const levels = group.map((idx) => groupHouseLevel(state, idx));
+  const thisLevel = groupHouseLevel(state, spaceIndex);
+  if (state.settings.evenBuild && thisLevel !== Math.min(...levels)) {
+    return "Build evenly — this region has properties with fewer houses first.";
+  }
+
+  if (thisLevel < 4) {
+    return totalHousesInPlay(state) < MAX_HOUSES_IN_BANK ? null : "The bank is out of houses.";
+  }
+  return totalHotelsInPlay(state) < MAX_HOTELS_IN_BANK ? null : "The bank is out of hotels.";
+}
+
 function canBuildHouse(state: GameState, playerId: string, spaceIndex: number): boolean {
   const space = boardOf(state)[spaceIndex];
   if (space.type !== "property") return false;
