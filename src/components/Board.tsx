@@ -1,8 +1,8 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { useEffect, useRef, useState } from "react";
-import type { Space } from "@/game/board";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { GOTOJAIL_INDEX, JAIL_INDEX, type Space } from "@/game/board";
 import { MAPS } from "@/game/maps";
 import type { GameState, PlayerState } from "@/game/types";
 import { formatCAD } from "@/lib/money";
@@ -69,22 +69,36 @@ const ROTATION: Record<Edge, number> = { bottom: 0, left: 90, top: 0, right: -90
 const STEP_MS = 120;
 const MAX_ANIMATED_STEPS = 12;
 
-function useAnimatedIndex(target: number): number {
+// (Section 2a) Being sent to jail must never teleport — the player is
+// walked/snapped to the Go To Jail space first, held there for this long
+// with the space highlighted, then moved on to jail. This applies uniformly
+// whether the send came from landing on Go To Jail, a card, or three
+// doubles in a row — the client only ever sees the final position (no
+// event-stream access here), so it can't tell those apart, but the visible
+// discontinuity is identical either way.
+export const JAIL_HOLD_MS = 600;
+
+// `holdAt`, when non-null, pins the displayed position there (walking/
+// snapping to it like any other target) and ignores `target` until the
+// caller clears it back to null — that's what turns a single state jump
+// into "walk to 30, hold, then continue to jail" without this hook needing
+// its own timer.
+function useAnimatedIndex(target: number, holdAt: number | null): number {
   const [display, setDisplay] = useState(target);
   const displayRef = useRef(target);
+  const wasHoldingRef = useRef(false);
 
-  useEffect(() => {
-    if (displayRef.current === target) return;
-
+  const walkOrSnapTo = useCallback((next: number) => {
     const from = displayRef.current;
-    const forward = (target - from + 40) % 40;
-    const backward = (from - target + 40) % 40;
+    if (from === next) return () => {};
+    const forward = (next - from + 40) % 40;
+    const backward = (from - next + 40) % 40;
     const steps = Math.min(forward, backward);
 
-    if (steps === 0 || steps > MAX_ANIMATED_STEPS) {
-      displayRef.current = target;
-      setDisplay(target);
-      return;
+    if (steps > MAX_ANIMATED_STEPS) {
+      displayRef.current = next;
+      setDisplay(next);
+      return () => {};
     }
 
     const direction = forward <= backward ? 1 : -1;
@@ -102,13 +116,35 @@ function useAnimatedIndex(target: number): number {
     timer = setTimeout(tick, STEP_MS);
 
     return () => clearTimeout(timer);
-  }, [target]);
+  }, []);
+
+  useEffect(() => {
+    if (holdAt !== null) {
+      wasHoldingRef.current = true;
+      return walkOrSnapTo(holdAt);
+    }
+    if (wasHoldingRef.current) {
+      wasHoldingRef.current = false;
+      return walkOrSnapTo(target);
+    }
+    return walkOrSnapTo(target);
+  }, [target, holdAt, walkOrSnapTo]);
 
   return display;
 }
 
-function PlayerToken({ player, offsetIndex, offsetCount }: { player: PlayerState; offsetIndex: number; offsetCount: number }) {
-  const displayIndex = useAnimatedIndex(player.position);
+function PlayerToken({
+  player,
+  offsetIndex,
+  offsetCount,
+  jailHoldAt,
+}: {
+  player: PlayerState;
+  offsetIndex: number;
+  offsetCount: number;
+  jailHoldAt: number | null;
+}) {
+  const displayIndex = useAnimatedIndex(player.position, jailHoldAt);
   const { left, top } = centerPercent(displayIndex);
 
   // Scatter multiple tokens on the same space in a small ring so they
@@ -205,10 +241,12 @@ function BoardSpace({
   space,
   state,
   onInspect,
+  highlighted,
 }: {
   space: Space;
   state: GameState;
   onInspect?: (spaceIndex: number) => void;
+  highlighted?: boolean;
 }) {
   const { row, col } = gridPosition(space.index);
   const edge = edgeForIndex(space.index);
@@ -255,7 +293,7 @@ function BoardSpace({
       }}
       className={`relative flex cursor-pointer overflow-hidden bg-board outline-none focus-visible:ring-2 focus-visible:ring-accent ${
         edge === "corner" ? "items-center justify-center" : ""
-      }`}
+      } ${highlighted ? "z-20 ring-4 ring-accent animate-pulse" : ""}`}
       style={{ gridRow: row, gridColumn: col }}
     >
       {own?.mortgaged && (
@@ -330,6 +368,36 @@ function cornerIcon(space: Space): string {
   }
 }
 
+// The client only ever sees the post-move GameState (no event-stream
+// access here — see JAIL_HOLD_MS above), so "just got sent to jail" is
+// detected purely from the position/inJail transition since the last
+// render: not in jail before, in jail now, sitting on the jail space.
+function useJailHolds(players: readonly PlayerState[]): Set<string> {
+  const prevRef = useRef<Map<string, { position: number; inJail: boolean }>>(new Map());
+  const [holdingIds, setHoldingIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const prev = prevRef.current;
+    const next = new Map<string, { position: number; inJail: boolean }>();
+    const newlyJailed: string[] = [];
+    for (const p of players) {
+      const before = prev.get(p.id);
+      if (before && !before.inJail && p.inJail && p.position === JAIL_INDEX) {
+        newlyJailed.push(p.id);
+      }
+      next.set(p.id, { position: p.position, inJail: p.inJail });
+    }
+    prevRef.current = next;
+
+    if (newlyJailed.length === 0) return;
+    setHoldingIds(new Set(newlyJailed));
+    const timer = setTimeout(() => setHoldingIds(new Set()), JAIL_HOLD_MS);
+    return () => clearTimeout(timer);
+  }, [players]);
+
+  return holdingIds;
+}
+
 export function Board({ state, className, onInspect }: BoardProps) {
   const spaces = MAPS[state.settings.mapId].spaces;
   const playersBySpace = new Map<number, PlayerState[]>();
@@ -339,6 +407,9 @@ export function Board({ state, className, onInspect }: BoardProps) {
     list.push(player);
     playersBySpace.set(player.position, list);
   }
+
+  const jailHoldingIds = useJailHolds(state.players);
+  const highlightIndex = jailHoldingIds.size > 0 ? GOTOJAIL_INDEX : null;
 
   return (
     <div
@@ -356,7 +427,13 @@ export function Board({ state, className, onInspect }: BoardProps) {
           style={{ gap: "var(--board-grid-gap)" }}
         >
           {spaces.map((space) => (
-            <BoardSpace key={space.index} space={space} state={state} onInspect={onInspect} />
+            <BoardSpace
+              key={space.index}
+              space={space}
+              state={state}
+              onInspect={onInspect}
+              highlighted={highlightIndex === space.index}
+            />
           ))}
           {/* The 9x9 interior isn't covered by any space — without this,
               it falls through to the grid's own background (bg-board-line,
@@ -376,7 +453,13 @@ export function Board({ state, className, onInspect }: BoardProps) {
               const sameSpace = playersBySpace.get(player.position) ?? [];
               const offsetIndex = sameSpace.findIndex((p) => p.id === player.id);
               return (
-                <PlayerToken key={player.id} player={player} offsetIndex={offsetIndex} offsetCount={sameSpace.length} />
+                <PlayerToken
+                  key={player.id}
+                  player={player}
+                  offsetIndex={offsetIndex}
+                  offsetCount={sameSpace.length}
+                  jailHoldAt={jailHoldingIds.has(player.id) ? GOTOJAIL_INDEX : null}
+                />
               );
             })}
         </div>
