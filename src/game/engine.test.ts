@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MAPS } from "./maps";
-import type { PropertySpace } from "./board";
+import { GO_SALARY, type PropertySpace } from "./board";
 import { rollFor } from "./dice";
 import {
   computeDebtReliefPlan,
@@ -116,11 +116,26 @@ describe("jail", () => {
     const state = makeState(
       [makePlayer("p1", 0, { position: 10, inJail: true, jailTurns: 2, cashCents: 10_000 }), makePlayer("p2", 1)],
     );
-    const { state: next } = reduce(state, { type: "ROLL", playerId: "p1", d1: 2, d2: 5 }); // non-double
+    const { state: next, events } = reduce(state, { type: "ROLL", playerId: "p1", d1: 2, d2: 5 }); // non-double
 
     expect(next.players[0].inJail).toBe(false);
     expect(next.players[0].cashCents).toBe(10_000 - 5_000); // $50 fine
     expect(next.players[0].position).toBe(17); // 10 + 7, moved this same turn
+    // Real bug: this forced fine moved the cash but never logged it.
+    expect(
+      events.some((e) => e.type === "JAIL_ESCAPED" && e.method === "forcedFine" && e.amount === 5_000),
+    ).toBe(true);
+  });
+
+  it("defers the forced fine as a jailFine debt when the player can't afford it", () => {
+    const state = makeState(
+      [makePlayer("p1", 0, { position: 10, inJail: true, jailTurns: 2, cashCents: 1_000 }), makePlayer("p2", 1)],
+    );
+    const { state: next, events } = reduce(state, { type: "ROLL", playerId: "p1", d1: 2, d2: 5 });
+
+    expect(next.turnPhase).toBe("awaiting_payment");
+    expect(next.pendingDebt).toEqual({ amount: 5_000, creditorId: "bank", reason: "jailFine" });
+    expect(events.some((e) => e.type === "JAIL_ESCAPED")).toBe(false); // not out yet — still owes the fine
   });
 });
 
@@ -1080,5 +1095,231 @@ describe("EXECUTE_ACCEPTED_TRADE", () => {
       receive: { cashCents: 0, spaceIndexes: [], jailFreeCards: 0 },
     });
     expect(events).toHaveLength(0);
+  });
+});
+
+// CRITICAL BUG audit (Section 1): every card whose effect pays or collects
+// cash must actually move that cash AND log the exact amount. This was
+// silently broken for the immediate (non-deferred) path on every
+// cash-moving effect type — the money moved but no event was ever pushed to
+// say so. One test per card, asserting the real cash delta against the
+// card's own stated effect, not a re-derived expectation.
+describe("card effects move exactly the cash they claim to (all 32 naija cards)", () => {
+  const allCards = [...DECKS.treasure, ...DECKS.surprise];
+
+  it("covers all 32 naija cards (16 treasure + 16 surprise)", () => {
+    expect(DECKS.treasure).toHaveLength(16);
+    expect(DECKS.surprise).toHaveLength(16);
+    expect(allCards).toHaveLength(32);
+  });
+
+  for (const card of allCards) {
+    it(`${card.id} (${card.deck}): "${card.text}"`, () => {
+      const effect = card.effect;
+      const startPosition = effect.type === "nearestTransport" || effect.type === "nearestUtility" ? 0 : 3;
+      const you = makePlayer("a", 0, { position: startPosition });
+      const b = makePlayer("b", 1);
+      const c = makePlayer("c", 2);
+      let state = makeState([you, b, c], {
+        turnPhase: "awaiting_card",
+        pendingCardDeck: card.deck,
+      });
+
+      // Repairs cards need owned, improved property to produce a nonzero
+      // cost — Agege (index 1, brown) with 2 houses.
+      if (effect.type === "repairs") {
+        state = { ...state, ownership: { 1: { ownerId: "a", houses: 2, hotel: false, mortgaged: false } } };
+      }
+
+      const beforeCash = new Map(state.players.map((p) => [p.id, p.cashCents]));
+      const { state: after, events } = reduce(state, { type: "DRAW_CARD", playerId: "a", cardId: card.id });
+      const you2 = after.players.find((p) => p.id === "a")!;
+      const delta = (id: string) => after.players.find((p) => p.id === id)!.cashCents - beforeCash.get(id)!;
+
+      expect(events.some((e) => e.type === "CARD_DRAWN" && e.cardId === card.id)).toBe(true);
+
+      switch (effect.type) {
+        case "collect":
+          expect(delta("a")).toBe(effect.amount);
+          expect(
+            events.some((e) => e.type === "CARD_CASH_COLLECTED" && e.playerId === "a" && e.amount === effect.amount),
+          ).toBe(true);
+          break;
+
+        case "pay":
+          expect(delta("a")).toBe(-effect.amount);
+          expect(
+            events.some((e) => e.type === "CARD_CASH_PAID" && e.playerId === "a" && e.amount === effect.amount),
+          ).toBe(true);
+          break;
+
+        case "collectFromEach": {
+          const total = effect.amount * 2;
+          expect(delta("a")).toBe(total);
+          expect(delta("b")).toBe(-effect.amount);
+          expect(delta("c")).toBe(-effect.amount);
+          expect(
+            events.some(
+              (e) =>
+                e.type === "CARD_CASH_COLLECTED_FROM_EACH" &&
+                e.playerId === "a" &&
+                e.amountPerPlayer === effect.amount &&
+                e.totalAmount === total,
+            ),
+          ).toBe(true);
+          break;
+        }
+
+        case "payEach": {
+          const total = effect.amount * 2;
+          expect(delta("a")).toBe(-total);
+          expect(delta("b")).toBe(effect.amount);
+          expect(delta("c")).toBe(effect.amount);
+          expect(
+            events.some(
+              (e) =>
+                e.type === "CARD_CASH_PAID_TO_EACH" &&
+                e.playerId === "a" &&
+                e.amountPerPlayer === effect.amount &&
+                e.totalAmount === total,
+            ),
+          ).toBe(true);
+          break;
+        }
+
+        case "repairs": {
+          const expectedCost = 2 * effect.perHouse;
+          expect(delta("a")).toBe(-expectedCost);
+          expect(
+            events.some((e) => e.type === "CARD_CASH_PAID" && e.playerId === "a" && e.amount === expectedCost),
+          ).toBe(true);
+          break;
+        }
+
+        case "jailFree":
+          expect(delta("a")).toBe(0);
+          expect(you2.jailFreeCards).toBe(1);
+          expect(events.some((e) => e.type === "CARD_JAIL_FREE_RECEIVED" && e.playerId === "a")).toBe(true);
+          break;
+
+        case "goToJail":
+          expect(delta("a")).toBe(0);
+          expect(you2.inJail).toBe(true);
+          expect(events.some((e) => e.type === "SENT_TO_JAIL" && e.playerId === "a")).toBe(true);
+          break;
+
+        case "moveTo":
+          expect(you2.position).toBe(effect.to);
+          expect(delta("a")).toBe(effect.passGoPays ? GO_SALARY : 0);
+          break;
+
+        case "moveBack":
+          expect(you2.position).toBe(((startPosition - effect.spaces) % 40 + 40) % 40);
+          expect(delta("a")).toBe(0);
+          break;
+
+        case "nearestTransport":
+        case "nearestUtility":
+          // Target is unowned in this setup (awaiting_purchase), and
+          // starting at position 0 never wraps past GO — no cash moves.
+          expect(delta("a")).toBe(0);
+          break;
+      }
+    });
+  }
+});
+
+describe("Section 1 event-vocabulary regressions", () => {
+  it("nearestTransport rent on an OWNED target is actually charged AND logged", () => {
+    const owner = makePlayer("owner", 1, { cashCents: 0 });
+    const player = makePlayer("a", 0, { position: 0 });
+    const state = makeState([player, owner], {
+      turnPhase: "awaiting_card",
+      pendingCardDeck: "surprise",
+      ownership: { 5: { ownerId: "owner", houses: 0, hotel: false, mortgaged: false } },
+    });
+    const card = DECKS.surprise.find((c) => c.effect.type === "nearestTransport")!;
+    const { state: next, events } = reduce(state, { type: "DRAW_CARD", playerId: "a", cardId: card.id });
+
+    const expectedRent = 3_000 * 2; // TRANSPORT_RENT[0] ($30) * rentMultiplier(2)
+    expect(next.players[0].cashCents).toBe(150_000 - expectedRent);
+    expect(next.players[1].cashCents).toBe(expectedRent);
+    expect(
+      events.some(
+        (e) => e.type === "RENT_PAID" && e.payerId === "a" && e.payeeId === "owner" && e.amount === expectedRent && e.spaceIndex === 5,
+      ),
+    ).toBe(true);
+  });
+
+  it("a deferred card debt, once paid off, logs CARD_CASH_PAID (not silently)", () => {
+    const player = makePlayer("a", 0, { position: 3, cashCents: 0 });
+    const other = makePlayer("b", 1);
+    const state = makeState([player, other], {
+      turnPhase: "awaiting_payment",
+      pendingDebt: { amount: 5_000, creditorId: "bank", reason: "card" },
+    });
+    const funded = { ...state, players: [{ ...player, cashCents: 5_000 }, other] };
+    const { state: next, events } = reduce(funded, { type: "PAY_RENT", playerId: "a" });
+
+    expect(next.pendingDebt).toBeNull();
+    expect(next.players[0].cashCents).toBe(0);
+    expect(events.some((e) => e.type === "CARD_CASH_PAID" && e.playerId === "a" && e.amount === 5_000)).toBe(true);
+  });
+
+  it("TAX_PAID names the space landed on", () => {
+    // Customs Duty is space 38, flat $100 — land there via a roll from 30+8.
+    const state = makeState([makePlayer("a", 0, { position: 30, cashCents: 100_000 }), makePlayer("b", 1)]);
+    const { events } = reduce(state, { type: "ROLL", playerId: "a", d1: 3, d2: 5 }); // 30 + 8 = 38
+    expect(events.some((e) => e.type === "TAX_PAID" && e.spaceIndex === 38 && e.amount === 10_000)).toBe(true);
+  });
+
+  it("MORTGAGED/UNMORTGAGED log the actual cash amount", () => {
+    const state = makeState([makePlayer("p1", 0, { cashCents: 100_000 }), makePlayer("p2", 1)], {
+      turnPhase: "awaiting_end_turn",
+      ownership: { 1: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false } }, // Agege, price $50 -> mortgageValue 2_500
+    });
+    const mortgaged = reduce(state, { type: "MORTGAGE", playerId: "p1", spaceIndex: 1 });
+    expect(mortgaged.events.some((e) => e.type === "MORTGAGED" && e.amount === 2_500)).toBe(true);
+
+    const unmortgaged = reduce(mortgaged.state, { type: "UNMORTGAGE", playerId: "p1", spaceIndex: 1 });
+    expect(unmortgaged.events.some((e) => e.type === "UNMORTGAGED" && e.amount === 2_750)).toBe(true); // 2_500 * 1.1
+  });
+
+  it("HOUSE_BUILT/HOUSE_SOLD log the price paid/received", () => {
+    const state = makeState([makePlayer("p1", 0, { cashCents: 100_000 }), makePlayer("p2", 1)], {
+      turnPhase: "awaiting_end_turn",
+      ownership: {
+        1: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false },
+        3: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false },
+      },
+    });
+    const built = reduce(state, { type: "BUILD_HOUSE", playerId: "p1", spaceIndex: 1 });
+    expect(built.events.some((e) => e.type === "HOUSE_BUILT" && e.price === 5_000)).toBe(true); // brown houseCost $50
+
+    const sold = reduce(built.state, { type: "SELL_HOUSE", playerId: "p1", spaceIndex: 1 });
+    expect(sold.events.some((e) => e.type === "HOUSE_SOLD" && e.amount === 2_500)).toBe(true); // half of $50
+  });
+
+  it("TRADE_ACCEPTED carries the full give/receive offer, not just player ids", () => {
+    const p1 = makePlayer("p1", 0, { cashCents: 50_000 });
+    const p2 = makePlayer("p2", 1, { cashCents: 50_000 });
+    const state = makeState([p1, p2], {
+      turnPhase: "awaiting_end_turn",
+      ownership: {
+        1: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false },
+        6: { ownerId: "p2", houses: 0, hotel: false, mortgaged: false },
+      },
+    });
+    const give = { cashCents: 0, spaceIndexes: [1], jailFreeCards: 0 };
+    const receive = { cashCents: 5_000, spaceIndexes: [6], jailFreeCards: 0 };
+    const { events } = reduce(state, {
+      type: "EXECUTE_ACCEPTED_TRADE",
+      playerId: "p2",
+      fromPlayerId: "p1",
+      toPlayerId: "p2",
+      give,
+      receive,
+    });
+    expect(events.some((e) => e.type === "TRADE_ACCEPTED" && e.give === give && e.receive === receive)).toBe(true);
   });
 });

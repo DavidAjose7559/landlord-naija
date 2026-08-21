@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Space } from "@/game/board";
 import type { PlayerState } from "@/game/types";
-import { formatCAD } from "@/lib/money";
+import { buildLines, type EventRow } from "@/lib/event-log-format";
 import { supabase } from "@/lib/supabase/client";
 
 interface EventLogProps {
@@ -11,117 +11,10 @@ interface EventLogProps {
   players: readonly PlayerState[];
   spaces: readonly Space[];
   jailLabel: string;
+  deckLabels: { treasure: string; surprise: string };
 }
 
-interface EventRow {
-  seq: number;
-  type: string;
-  payload: Record<string, unknown>;
-}
-
-function playerName(players: readonly PlayerState[], id: unknown): string {
-  return players.find((p) => p.id === id)?.name ?? "Someone";
-}
-
-function spaceNameIn(spaces: readonly Space[], index: unknown): string {
-  const i = Number(index);
-  return spaces[i]?.name ?? "somewhere";
-}
-
-// Turns a raw {type, payload} row into a plain sentence for the feed. A
-// ROLLED event immediately followed by that same player's MOVED event
-// (the normal case — the roll that caused the move) reads as one
-// sentence; everything else renders standalone.
-function describeEvent(
-  event: EventRow,
-  next: EventRow | undefined,
-  players: readonly PlayerState[],
-  spaces: readonly Space[],
-  jailLabel: string,
-): string | null {
-  const p = event.payload;
-  const spaceName = (index: unknown) => spaceNameIn(spaces, index);
-
-  switch (event.type) {
-    case "GAME_STARTED":
-      return "The game has started.";
-    case "ROLLED": {
-      const total = Number(p.d1) + Number(p.d2);
-      if (next?.type === "MOVED" && next.payload.playerId === p.playerId) {
-        return `${playerName(players, p.playerId)} rolled ${total} and landed on ${spaceName(next.payload.to)}.`;
-      }
-      return `${playerName(players, p.playerId)} rolled ${total}.`;
-    }
-    case "MOVED":
-      return null; // consumed by the preceding ROLLED, or too noisy alone (card teleports still show via their own line)
-    case "PASSED_GO":
-      return `${playerName(players, p.playerId)} passed GO and collected ${formatCAD(Number(p.amount))}.`;
-    case "PROPERTY_PURCHASED":
-      return `${playerName(players, p.playerId)} bought ${spaceName(p.spaceIndex)} for ${formatCAD(Number(p.price))}.`;
-    case "PROPERTY_DECLINED":
-      return `${playerName(players, p.playerId)} declined to buy ${spaceName(p.spaceIndex)}.`;
-    case "RENT_PAID":
-      return `${playerName(players, p.payerId)} paid ${playerName(players, p.payeeId)} ${formatCAD(Number(p.amount))} rent on ${spaceName(p.spaceIndex)}.`;
-    case "TAX_PAID":
-      return `${playerName(players, p.playerId)} paid ${formatCAD(Number(p.amount))} in tax.`;
-    case "CARD_DRAWN":
-      return `${playerName(players, p.playerId)} drew a card: "${String(p.text)}"`;
-    case "DEBT_PENDING":
-      return `${playerName(players, p.playerId)} owes ${formatCAD(Number(p.amount))} and needs to raise funds.`;
-    case "HOUSE_BUILT":
-      return p.hotel
-        ? `${playerName(players, p.playerId)} built a hotel on ${spaceName(p.spaceIndex)}.`
-        : `${playerName(players, p.playerId)} built a house on ${spaceName(p.spaceIndex)}.`;
-    case "HOUSE_SOLD":
-      return `${playerName(players, p.playerId)} sold a house on ${spaceName(p.spaceIndex)}.`;
-    case "MORTGAGED":
-      return `${playerName(players, p.playerId)} mortgaged ${spaceName(p.spaceIndex)}.`;
-    case "UNMORTGAGED":
-      return `${playerName(players, p.playerId)} paid off the mortgage on ${spaceName(p.spaceIndex)}.`;
-    case "SENT_TO_JAIL":
-      return `${playerName(players, p.playerId)} was sent to ${jailLabel}.`;
-    case "JAIL_ESCAPED": {
-      const method = p.method === "doubles" ? "rolling doubles" : p.method === "fine" ? "paying the fine" : "a jail-free card";
-      return `${playerName(players, p.playerId)} got out of ${jailLabel} by ${method}.`;
-    }
-    case "PLAYER_BANKRUPT":
-      return `${playerName(players, p.playerId)} went bankrupt!`;
-    case "GAME_OVER":
-      return `${playerName(players, p.winnerPlayerId)} wins the game!`;
-    case "TRADE_PROPOSED":
-      return "A trade was proposed.";
-    case "TRADE_ACCEPTED":
-      return "A trade was accepted.";
-    case "TRADE_DECLINED":
-      return "A trade was declined.";
-    case "TRADE_REJECTED":
-      return `That trade fell through: ${String(p.reason)}.`;
-    case "SETTINGS_UPDATED":
-      return "The host changed the game settings.";
-    case "AUCTION_STARTED":
-      return `${spaceName(p.spaceIndex)} is up for auction.`;
-    case "BID_PLACED":
-      return `${playerName(players, p.playerId)} bid ${formatCAD(Number(p.amount))}.`;
-    case "AUCTION_PASSED":
-      return `${playerName(players, p.playerId)} passed on the auction.`;
-    case "AUCTION_WON":
-      return `${playerName(players, p.playerId)} won ${spaceName(p.spaceIndex)} at auction for ${formatCAD(Number(p.amount))}.`;
-    case "AUCTION_ENDED_NO_WINNER":
-      return `The auction for ${spaceName(p.spaceIndex)} ended with no bids — it stays with the bank.`;
-    case "FREE_PARKING_PAID":
-      return `${playerName(players, p.playerId)} collected the Free Parking jackpot: ${formatCAD(Number(p.amount))}.`;
-    case "TURN_TIMED_OUT":
-      return `${playerName(players, p.playerId)}'s turn timed out.`;
-    case "PROPERTIES_RETURNED_TO_MARKET":
-      return `${playerName(players, p.playerId)}'s properties have returned to the market.`;
-    case "DEBT_RELIEF_APPLIED":
-      return `${playerName(players, p.playerId)} raised cash to cover their debt.`;
-    default:
-      return null;
-  }
-}
-
-export function EventLog({ gameId, players, spaces, jailLabel }: EventLogProps) {
+export function EventLog({ gameId, players, spaces, jailLabel, deckLabels }: EventLogProps) {
   const [events, setEvents] = useState<EventRow[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -147,7 +40,7 @@ export function EventLog({ gameId, players, spaces, jailLabel }: EventLogProps) 
           // Realtime doesn't guarantee delivery order across the several
           // rows one action can insert (e.g. ROLLED then MOVED) — sort by
           // seq (and dedupe) rather than trusting arrival order, or the
-          // ROLLED+MOVED merge below can silently miss its pair.
+          // merge logic in buildLines can silently miss its pair.
           const row = payload.new as EventRow;
           setEvents((prev) => {
             if (prev.some((e) => e.seq === row.seq)) return prev;
@@ -168,9 +61,7 @@ export function EventLog({ gameId, players, spaces, jailLabel }: EventLogProps) 
     if (el) el.scrollTop = el.scrollHeight;
   }, [events]);
 
-  const lines = events
-    .map((event, i) => ({ seq: event.seq, text: describeEvent(event, events[i + 1], players, spaces, jailLabel) }))
-    .filter((line): line is { seq: number; text: string } => line.text !== null);
+  const lines = buildLines(events, players, spaces, jailLabel, deckLabels);
 
   return (
     <div
@@ -181,7 +72,10 @@ export function EventLog({ gameId, players, spaces, jailLabel }: EventLogProps) 
     >
       {lines.length === 0 && <p className="text-xs text-muted">Nothing has happened yet.</p>}
       {lines.map((line) => (
-        <p key={line.seq} className="text-xs leading-relaxed text-muted">
+        <p
+          key={line.seq}
+          className={`text-xs leading-relaxed text-muted ${line.indent ? "ml-4 border-l border-border pl-2" : ""}`}
+        >
           {line.text}
         </p>
       ))}

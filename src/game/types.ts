@@ -109,7 +109,7 @@ export interface PropertyOwnership {
 export interface PendingDebt {
   amount: number;
   creditorId: string | "bank";
-  reason: "rent" | "tax" | "card";
+  reason: "rent" | "tax" | "card" | "jailFine";
 }
 
 export interface TradeOffer {

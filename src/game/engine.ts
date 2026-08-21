@@ -101,23 +101,28 @@ export type GameEvent =
   | { type: "AUCTION_WON"; playerId: string; spaceIndex: number; amount: number }
   | { type: "AUCTION_ENDED_NO_WINNER"; spaceIndex: number }
   | { type: "RENT_PAID"; payerId: string; payeeId: string; spaceIndex: number; amount: number }
-  | { type: "TAX_PAID"; playerId: string; amount: number }
+  | { type: "TAX_PAID"; playerId: string; amount: number; spaceIndex: number }
   | { type: "FREE_PARKING_PAID"; playerId: string; amount: number }
   | { type: "CARD_DRAWN"; playerId: string; deck: Deck; cardId: string; text: string }
+  | { type: "CARD_CASH_COLLECTED"; playerId: string; amount: number }
+  | { type: "CARD_CASH_PAID"; playerId: string; amount: number }
+  | { type: "CARD_CASH_COLLECTED_FROM_EACH"; playerId: string; amountPerPlayer: number; totalAmount: number }
+  | { type: "CARD_CASH_PAID_TO_EACH"; playerId: string; amountPerPlayer: number; totalAmount: number }
+  | { type: "CARD_JAIL_FREE_RECEIVED"; playerId: string }
   | { type: "DEBT_PENDING"; playerId: string; amount: number; creditorId: string; reason: string }
-  | { type: "HOUSE_BUILT"; playerId: string; spaceIndex: number; houses: number; hotel: boolean }
-  | { type: "HOUSE_SOLD"; playerId: string; spaceIndex: number; houses: number; hotel: boolean }
-  | { type: "MORTGAGED"; playerId: string; spaceIndex: number }
-  | { type: "UNMORTGAGED"; playerId: string; spaceIndex: number }
+  | { type: "HOUSE_BUILT"; playerId: string; spaceIndex: number; houses: number; hotel: boolean; price: number }
+  | { type: "HOUSE_SOLD"; playerId: string; spaceIndex: number; houses: number; hotel: boolean; amount: number }
+  | { type: "MORTGAGED"; playerId: string; spaceIndex: number; amount: number }
+  | { type: "UNMORTGAGED"; playerId: string; spaceIndex: number; amount: number }
   | { type: "DEBT_RELIEF_APPLIED"; playerId: string; operations: DebtReliefOperation[] }
   | { type: "SENT_TO_JAIL"; playerId: string; reason: string }
-  | { type: "JAIL_ESCAPED"; playerId: string; method: "doubles" | "fine" | "card" }
+  | { type: "JAIL_ESCAPED"; playerId: string; method: "doubles" | "fine" | "forcedFine" | "card"; amount?: number }
   | { type: "TURN_ENDED"; playerId: string }
   | { type: "TURN_TIMED_OUT"; playerId: string }
   | { type: "PLAYER_BANKRUPT"; playerId: string; creditorId: string | "bank" }
   | { type: "PROPERTIES_RETURNED_TO_MARKET"; playerId: string }
   | { type: "GAME_OVER"; winnerPlayerId: string }
-  | { type: "TRADE_ACCEPTED"; fromPlayerId: string; toPlayerId: string };
+  | { type: "TRADE_ACCEPTED"; fromPlayerId: string; toPlayerId: string; give: TradeOffer; receive: TradeOffer };
 
 // The state a freshly-created game starts in, before any player has
 // joined. The caller (API layer) pushes players into `players` directly
@@ -401,7 +406,7 @@ function resolveLanding(state: GameState, player: PlayerState, events: GameEvent
       }
       chargeOrDefer(state, player, space.amount, "bank", "tax", events);
       if (state.turnPhase !== "awaiting_payment") {
-        events.push({ type: "TAX_PAID", playerId: player.id, amount: space.amount });
+        events.push({ type: "TAX_PAID", playerId: player.id, amount: space.amount, spaceIndex: space.index });
       }
       return;
     }
@@ -464,30 +469,51 @@ function applyCardEffect(state: GameState, player: PlayerState, card: Card, even
   switch (effect.type) {
     case "collect":
       player.cashCents += effect.amount;
+      events.push({ type: "CARD_CASH_COLLECTED", playerId: player.id, amount: effect.amount });
       return;
 
     case "pay":
       chargeOrDefer(state, player, effect.amount, "bank", "card", events);
+      if (state.turnPhase !== "awaiting_payment") {
+        events.push({ type: "CARD_CASH_PAID", playerId: player.id, amount: effect.amount });
+      }
       return;
 
-    case "collectFromEach":
+    case "collectFromEach": {
+      let total = 0;
       for (const other of state.players) {
         if (other.id === player.id || other.bankrupt) continue;
         const paid = Math.min(effect.amount, other.cashCents);
         other.cashCents -= paid;
         player.cashCents += paid;
+        total += paid;
       }
+      events.push({
+        type: "CARD_CASH_COLLECTED_FROM_EACH",
+        playerId: player.id,
+        amountPerPlayer: effect.amount,
+        totalAmount: total,
+      });
       return;
+    }
 
     case "payEach": {
       let remaining = player.cashCents;
+      let total = 0;
       for (const other of state.players) {
         if (other.id === player.id || other.bankrupt) continue;
         const paid = Math.min(effect.amount, remaining);
         remaining -= paid;
         other.cashCents += paid;
+        total += paid;
       }
       player.cashCents = remaining;
+      events.push({
+        type: "CARD_CASH_PAID_TO_EACH",
+        playerId: player.id,
+        amountPerPlayer: effect.amount,
+        totalAmount: total,
+      });
       return;
     }
 
@@ -507,6 +533,7 @@ function applyCardEffect(state: GameState, player: PlayerState, card: Card, even
 
     case "jailFree":
       player.jailFreeCards += 1;
+      events.push({ type: "CARD_JAIL_FREE_RECEIVED", playerId: player.id });
       return;
 
     case "repairs": {
@@ -520,6 +547,9 @@ function applyCardEffect(state: GameState, player: PlayerState, card: Card, even
         cost += own.hotel ? effect.perHotel : own.houses * effect.perHouse;
       }
       chargeOrDefer(state, player, cost, "bank", "card", events);
+      if (cost > 0 && state.turnPhase !== "awaiting_payment") {
+        events.push({ type: "CARD_CASH_PAID", playerId: player.id, amount: cost });
+      }
       return;
     }
 
@@ -539,6 +569,9 @@ function applyCardEffect(state: GameState, player: PlayerState, card: Card, even
       if (own.ownerId !== player.id && !own.mortgaged) {
         const rent = computeTransportRent(state, own.ownerId) * effect.rentMultiplier;
         chargeOrDefer(state, player, rent, own.ownerId, "rent", events);
+        if (state.turnPhase !== "awaiting_payment") {
+          events.push({ type: "RENT_PAID", payerId: player.id, payeeId: own.ownerId, spaceIndex: to, amount: rent });
+        }
       }
       return;
     }
@@ -561,6 +594,9 @@ function applyCardEffect(state: GameState, player: PlayerState, card: Card, even
         // scaled to this card's fixed 10x rather than the ownership tier.
         const rent = dollars(diceTotal(state.lastRoll) * effect.rentMultiplier);
         chargeOrDefer(state, player, rent, own.ownerId, "rent", events);
+        if (state.turnPhase !== "awaiting_payment") {
+          events.push({ type: "RENT_PAID", payerId: player.id, payeeId: own.ownerId, spaceIndex: to, amount: rent });
+        }
       }
       return;
     }
@@ -1009,10 +1045,11 @@ function handleRoll(state: GameState, action: Extract<GameAction, { type: "ROLL"
 
     player.jailTurns += 1;
     if (player.jailTurns >= MAX_JAIL_TURNS) {
-      chargeOrDefer(state, player, JAIL_FINE, "bank", "tax", events);
+      chargeOrDefer(state, player, JAIL_FINE, "bank", "jailFine", events);
       player.inJail = false;
       player.jailTurns = 0;
       if (phaseOf(state) === "awaiting_payment") return; // must raise the fine first
+      events.push({ type: "JAIL_ESCAPED", playerId: player.id, method: "forcedFine", amount: JAIL_FINE });
       moveAndResolve(state, player, action.d1 + action.d2, events);
       if (isPausingPhase(state)) {
         return;
@@ -1199,7 +1236,7 @@ function handleChooseTax(
   chargeOrDefer(state, player, amount, "bank", "tax", events);
   if (phaseOf(state) === "awaiting_payment") return;
 
-  events.push({ type: "TAX_PAID", playerId: player.id, amount });
+  events.push({ type: "TAX_PAID", playerId: player.id, amount, spaceIndex: space.index });
   state.turnPhase = nextPhaseAfterResolution(state);
 }
 
@@ -1243,7 +1280,11 @@ function handlePayRent(state: GameState, playerId: string, events: GameEvent[]):
   if (reason === "rent") {
     events.push({ type: "RENT_PAID", payerId: player.id, payeeId: creditorId, spaceIndex: player.position, amount });
   } else if (reason === "tax") {
-    events.push({ type: "TAX_PAID", playerId: player.id, amount });
+    events.push({ type: "TAX_PAID", playerId: player.id, amount, spaceIndex: player.position });
+  } else if (reason === "card") {
+    events.push({ type: "CARD_CASH_PAID", playerId: player.id, amount });
+  } else if (reason === "jailFine") {
+    events.push({ type: "JAIL_ESCAPED", playerId: player.id, method: "forcedFine", amount });
   }
   state.turnPhase = nextPhaseAfterResolution(state);
 }
@@ -1299,7 +1340,7 @@ function handleBuildHouse(state: GameState, playerId: string, spaceIndex: number
   } else {
     own.houses += 1;
   }
-  events.push({ type: "HOUSE_BUILT", playerId, spaceIndex, houses: own.houses, hotel: own.hotel });
+  events.push({ type: "HOUSE_BUILT", playerId, spaceIndex, houses: own.houses, hotel: own.hotel, price: space.houseCost });
 }
 
 function handleSellHouse(state: GameState, playerId: string, spaceIndex: number, events: GameEvent[]): void {
@@ -1318,14 +1359,15 @@ function handleSellHouse(state: GameState, playerId: string, spaceIndex: number,
 
   const space = boardOf(state)[spaceIndex] as PropertySpace;
   const own = state.ownership[spaceIndex];
-  player.cashCents += Math.floor(space.houseCost / 2);
+  const saleAmount = Math.floor(space.houseCost / 2);
+  player.cashCents += saleAmount;
   if (own.hotel) {
     own.hotel = false;
     own.houses = 4;
   } else {
     own.houses -= 1;
   }
-  events.push({ type: "HOUSE_SOLD", playerId, spaceIndex, houses: own.houses, hotel: own.hotel });
+  events.push({ type: "HOUSE_SOLD", playerId, spaceIndex, houses: own.houses, hotel: own.hotel, amount: saleAmount });
 }
 
 // (Voluntary-mortgage pass, real bug) this had NO turn or phase check at
@@ -1350,7 +1392,7 @@ function handleMortgage(state: GameState, playerId: string, spaceIndex: number, 
 
   own.mortgaged = true;
   player.cashCents += space.mortgageValue;
-  events.push({ type: "MORTGAGED", playerId, spaceIndex });
+  events.push({ type: "MORTGAGED", playerId, spaceIndex, amount: space.mortgageValue });
 }
 
 function handleUnmortgage(state: GameState, playerId: string, spaceIndex: number, events: GameEvent[]): void {
@@ -1366,7 +1408,7 @@ function handleUnmortgage(state: GameState, playerId: string, spaceIndex: number
 
   own.mortgaged = false;
   player.cashCents -= space.unmortgageCost;
-  events.push({ type: "UNMORTGAGED", playerId, spaceIndex });
+  events.push({ type: "UNMORTGAGED", playerId, spaceIndex, amount: space.unmortgageCost });
 }
 
 function handlePayJailFine(state: GameState, playerId: string, events: GameEvent[]): void {
@@ -1377,7 +1419,7 @@ function handlePayJailFine(state: GameState, playerId: string, events: GameEvent
   player.cashCents -= JAIL_FINE;
   player.inJail = false;
   player.jailTurns = 0;
-  events.push({ type: "JAIL_ESCAPED", playerId, method: "fine" });
+  events.push({ type: "JAIL_ESCAPED", playerId, method: "fine", amount: JAIL_FINE });
 }
 
 function handleUseJailFree(state: GameState, playerId: string, events: GameEvent[]): void {
@@ -1508,7 +1550,13 @@ function handleExecuteAcceptedTrade(
   from.jailFreeCards += action.receive.jailFreeCards;
   for (const idx of action.receive.spaceIndexes) state.ownership[idx].ownerId = from.id;
 
-  events.push({ type: "TRADE_ACCEPTED", fromPlayerId: action.fromPlayerId, toPlayerId: action.toPlayerId });
+  events.push({
+    type: "TRADE_ACCEPTED",
+    fromPlayerId: action.fromPlayerId,
+    toPlayerId: action.toPlayerId,
+    give: action.give,
+    receive: action.receive,
+  });
 }
 
 // ============================================================================

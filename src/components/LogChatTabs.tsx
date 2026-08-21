@@ -15,13 +15,14 @@ interface LogChatTabsProps {
   players: readonly PlayerState[];
   spaces: readonly Space[];
   jailLabel: string;
+  deckLabels: { treasure: string; surprise: string };
 }
 
 // The panel was already crowded, so chat lives as a second tab next to
 // the event log rather than a whole extra area — this same tree is what
 // both the desktop side column and the mobile bottom sheet render (see
 // game/[code]/page.tsx's single panelContent), so both get chat for free.
-export function LogChatTabs({ gameId, roomCode, session, players, spaces, jailLabel }: LogChatTabsProps) {
+export function LogChatTabs({ gameId, roomCode, session, players, spaces, jailLabel, deckLabels }: LogChatTabsProps) {
   const [tab, setTab] = useState<"log" | "chat">("log");
   const { messages } = useChatMessages(gameId);
   const seenCountRef = useRef(0);
@@ -63,7 +64,7 @@ export function LogChatTabs({ gameId, roomCode, session, players, spaces, jailLa
       </div>
 
       {tab === "log" ? (
-        <EventLog gameId={gameId} players={players} spaces={spaces} jailLabel={jailLabel} />
+        <EventLog gameId={gameId} players={players} spaces={spaces} jailLabel={jailLabel} deckLabels={deckLabels} />
       ) : (
         <ChatPanel roomCode={roomCode} session={session} players={players} messages={messages} />
       )}

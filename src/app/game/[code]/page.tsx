@@ -100,6 +100,7 @@ export default function BoardPage() {
         players={game.state.players}
         spaces={MAPS[game.state.settings.mapId].spaces}
         jailLabel={MAPS[game.state.settings.mapId].jailLabel}
+        deckLabels={MAPS[game.state.settings.mapId].deckLabels}
       />
 
       {pending && <p className="text-center text-xs text-muted">Syncing…</p>}
