@@ -132,6 +132,10 @@ export class FakeSupabaseAdmin {
           return this.startGame(args);
         case "apply_game_action":
           return this.applyGameAction(args);
+        case "update_settings":
+          return this.updateSettings(args);
+        case "leave_lobby":
+          return this.leaveLobby(args);
         default:
           return { data: null, error: { message: `unknown rpc ${fn}` } };
       }
@@ -197,7 +201,7 @@ export class FakeSupabaseAdmin {
     game.doubles_count = 0;
     game.updated_at = new Date().toISOString();
     const secrets = this.db.gameSecrets.find((s) => s.game_id === args.p_game_id);
-    if (secrets) secrets.deck_state = { owambe: args.p_owambe_deck, village: args.p_village_deck };
+    if (secrets) secrets.deck_state = { treasure: args.p_treasure_deck, surprise: args.p_surprise_deck };
     return { data: null, error: null };
   }
 
@@ -242,6 +246,24 @@ export class FakeSupabaseAdmin {
       this.db.events.push({ game_id: args.p_game_id, seq, type: event.type, payload: event.payload });
     }
 
+    return { data: null, error: null };
+  }
+
+  private updateSettings(args: Record<string, any>): FakeResult<null> {
+    const game = this.db.games.find((g) => g.id === args.p_game_id && g.status === "lobby");
+    if (!game) return { data: null, error: null }; // matches the SQL's silent no-op when status != lobby
+    game.state = args.p_new_state;
+    game.updated_at = new Date().toISOString();
+    return { data: null, error: null };
+  }
+
+  private leaveLobby(args: Record<string, any>): FakeResult<null> {
+    this.db.players = this.db.players.filter((p) => !(p.id === args.p_player_id && p.game_id === args.p_game_id));
+    this.db.playerSecrets = this.db.playerSecrets.filter((s) => s.player_id !== args.p_player_id);
+    const game = this.db.games.find((g) => g.id === args.p_game_id && g.status === "lobby");
+    if (!game) return { data: null, error: null };
+    game.state = args.p_new_state;
+    game.updated_at = new Date().toISOString();
     return { data: null, error: null };
   }
 }

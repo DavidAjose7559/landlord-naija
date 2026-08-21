@@ -2,7 +2,8 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { SettingsPanel } from "@/components/SettingsPanel";
 import { useGame } from "@/hooks/useGame";
 import { PLAYER_TOKENS, PLAYER_TOKEN_EMOJI, PLAYER_TOKEN_LABEL } from "@/lib/tokens";
 import type { PlayerToken } from "@/game/types";
@@ -19,12 +20,27 @@ export default function LobbyPage() {
   const [joining, setJoining] = useState(false);
   const [starting, setStarting] = useState(false);
   const [copied, setCopied] = useState<"code" | "link" | null>(null);
+  const [hostChangedNotice, setHostChangedNotice] = useState<string | null>(null);
+  const prevHostId = useRef<string | null>(null);
 
   useEffect(() => {
     if (game && game.status !== "lobby") {
       router.replace(`/game/${roomCode}`);
     }
   }, [game, roomCode, router]);
+
+  useEffect(() => {
+    if (!game) return;
+    const hostId = game.state.hostPlayerId;
+    if (prevHostId.current && hostId && hostId !== prevHostId.current) {
+      const host = game.state.players.find((p) => p.id === hostId);
+      if (host) {
+        setHostChangedNotice(`${host.name} is now the host.`);
+        setTimeout(() => setHostChangedNotice(null), 4000);
+      }
+    }
+    prevHostId.current = hostId;
+  }, [game]);
 
   async function handleJoin(e: React.FormEvent) {
     e.preventDefault();
@@ -68,6 +84,15 @@ export default function LobbyPage() {
     }
   }
 
+  async function handleLeave(clientToken: string) {
+    await fetch(`/api/games/${roomCode}/leave`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ clientToken }),
+    });
+    setSession(null);
+  }
+
   function copy(text: string, which: "code" | "link") {
     void navigator.clipboard.writeText(text).then(() => {
       setCopied(which);
@@ -89,7 +114,7 @@ export default function LobbyPage() {
   if (!game || game.status !== "lobby") return null;
 
   const takenTokens = new Set(game.state.players.map((p) => p.token));
-  const isHost = session?.playerId === game.state.players[0]?.id;
+  const isHost = session?.playerId === game.state.hostPlayerId;
   const canStart = game.state.players.length >= 2;
 
   return (
@@ -98,6 +123,12 @@ export default function LobbyPage() {
         <div className="flex items-center gap-2 self-stretch rounded-2xl bg-surface-2 px-4 py-2.5 text-center text-xs text-ink">
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
           Reconnecting…
+        </div>
+      )}
+
+      {hostChangedNotice && (
+        <div className="self-stretch rounded-2xl bg-surface-2 px-4 py-2.5 text-center text-xs text-ink">
+          {hostChangedNotice}
         </div>
       )}
 
@@ -164,7 +195,7 @@ export default function LobbyPage() {
         <>
           <div className="flex w-full flex-col gap-2">
             <AnimatePresence initial={false}>
-              {game.state.players.map((player, i) => (
+              {game.state.players.map((player) => (
                 <motion.div
                   key={player.id}
                   initial={{ opacity: 0, y: 8 }}
@@ -174,15 +205,25 @@ export default function LobbyPage() {
                 >
                   <span className="text-2xl">{PLAYER_TOKEN_EMOJI[player.token]}</span>
                   <span className="flex-1 text-left font-medium text-ink">{player.name}</span>
-                  {i === 0 && <span className="text-xs font-semibold text-accent">HOST</span>}
+                  {player.id === game.state.hostPlayerId && <span className="text-xs font-semibold text-accent">HOST</span>}
                   {player.id === session.playerId && <span className="text-xs text-muted">you</span>}
                 </motion.div>
               ))}
             </AnimatePresence>
-            {game.state.players.length < 8 && (
+            {game.state.players.length < game.state.settings.maxPlayers && (
               <p className="px-5 py-2 text-sm text-muted">Waiting for more players to join…</p>
             )}
           </div>
+
+          <SettingsPanel game={game} isHost={isHost} roomCode={roomCode} clientToken={session.clientToken} />
+
+          <button
+            type="button"
+            onClick={() => handleLeave(session.clientToken)}
+            className="text-xs font-medium text-muted hover:text-danger"
+          >
+            Leave room
+          </button>
 
           {isHost && (
             <button

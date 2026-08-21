@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { MAPS } from "./maps";
 import { rollFor } from "./dice";
 import { netWorth, reduce, type GameAction } from "./engine";
-import type { GameState, PlayerState, PlayerToken } from "./types";
+import { DEFAULT_SETTINGS, type GameState, type PlayerState, type PlayerToken } from "./types";
 
 const BOARD = MAPS.naija.spaces;
 const DECKS = MAPS.naija.decks;
@@ -27,7 +27,8 @@ function makePlayer(id: string, seatIndex: number, overrides: Partial<PlayerStat
 
 function makeState(players: PlayerState[], overrides: Partial<GameState> = {}): GameState {
   return {
-    mapId: "naija",
+    settings: DEFAULT_SETTINGS,
+    hostPlayerId: null,
     status: "active",
     turnPhase: "awaiting_roll",
     currentPlayerIndex: 0,
@@ -40,6 +41,9 @@ function makeState(players: PlayerState[], overrides: Partial<GameState> = {}): 
     pendingCardDeck: null,
     pendingTaxChoice: null,
     pendingDebt: null,
+    pendingAuction: null,
+    freeParkingPot: 0,
+    turnStartedAt: null,
     trades: [],
     nextTradeId: 1,
     ...overrides,
@@ -410,5 +414,230 @@ describe("200-turn simulation", () => {
     expect(safety).toBeLessThan(SAFETY_CAP); // the loop made real progress, not stuck
     expect(turnsCompleted).toBeGreaterThan(0);
     assertAllCashValid(state);
+  });
+});
+
+// One test per settings.* field wired into the engine, proving ON and OFF
+// produce genuinely different behaviour (a setting that renders but does
+// nothing is a bug). mapId/maxPlayers/privateRoom/startingCashCents/
+// randomizePlayerOrder/turnTimeLimitSeconds live outside the pure engine
+// (map lookup, lobby caps, the public listing, join-time cash, shuffling,
+// and wall-clock timing respectively) — covered in test/api-games.test.ts.
+describe("settings", () => {
+  it("doubleRentOnFullSet: unimproved rent doubles on a full set when ON, stays flat when OFF", () => {
+    function rentCollected(doubleRentOnFullSet: boolean): number {
+      const state = makeState(
+        [makePlayer("p1", 0, { cashCents: 0 }), makePlayer("p2", 1, { position: 0, cashCents: 100_000 })],
+        {
+          currentPlayerIndex: 1,
+          settings: { ...DEFAULT_SETTINGS, doubleRentOnFullSet },
+          ownership: {
+            1: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false },
+            3: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false },
+          },
+        },
+      );
+      const { state: next } = reduce(state, { type: "ROLL", playerId: "p2", d1: 1, d2: 0 });
+      return next.players[0].cashCents;
+    }
+    const on = rentCollected(true);
+    const off = rentCollected(false);
+    expect(off).toBeGreaterThan(0);
+    expect(on).toBe(off * 2);
+  });
+
+  it("freeParkingCash: tax payments pool and pay out at Free Parking when ON, never accumulate when OFF", () => {
+    function potAfterTax(freeParkingCash: boolean): number {
+      const state = makeState([makePlayer("p1", 0, { position: 4, cashCents: 100_000 })], {
+        settings: { ...DEFAULT_SETTINGS, freeParkingCash },
+        turnPhase: "awaiting_tax_choice",
+        pendingTaxChoice: { spaceIndex: 4 },
+      });
+      const { state: next } = reduce(state, { type: "CHOOSE_TAX", playerId: "p1", option: "flat" });
+      return next.freeParkingPot;
+    }
+    expect(potAfterTax(true)).toBeGreaterThan(0);
+    expect(potAfterTax(false)).toBe(0);
+  });
+
+  it("freeParkingCash: landing on Free Parking with a pot collects it when ON", () => {
+    const state = makeState([makePlayer("p1", 0, { position: 20, cashCents: 1_000 })], {
+      settings: { ...DEFAULT_SETTINGS, freeParkingCash: true },
+      freeParkingPot: 5_000,
+    });
+    const { state: next, events } = reduce(state, { type: "ROLL", playerId: "p1", d1: 0, d2: 0 });
+    expect(next.players[0].cashCents).toBe(6_000);
+    expect(next.freeParkingPot).toBe(0);
+    expect(events.some((e) => e.type === "FREE_PARKING_PAID")).toBe(true);
+  });
+
+  it("auctionOnDecline: declining a purchase starts an auction when ON, leaves it with the bank when OFF", () => {
+    function declineOutcome(auctionOnDecline: boolean) {
+      const state = makeState([makePlayer("p1", 0, { position: 1 }), makePlayer("p2", 1)], {
+        settings: { ...DEFAULT_SETTINGS, auctionOnDecline },
+        turnPhase: "awaiting_purchase",
+      });
+      return reduce(state, { type: "DECLINE_BUY", playerId: "p1" }).state;
+    }
+    const on = declineOutcome(true);
+    expect(on.turnPhase).toBe("awaiting_auction");
+    expect(on.pendingAuction?.spaceIndex).toBe(1);
+
+    const off = declineOutcome(false);
+    expect(off.turnPhase).not.toBe("awaiting_auction");
+    expect(off.pendingAuction).toBeNull();
+  });
+
+  it("auction: the highest bidder wins the property and pays their bid", () => {
+    const state = makeState(
+      [makePlayer("p1", 0, { position: 1, cashCents: 100_000 }), makePlayer("p2", 1, { cashCents: 100_000 })],
+      { settings: { ...DEFAULT_SETTINGS, auctionOnDecline: true }, turnPhase: "awaiting_purchase" },
+    );
+    const { state: afterDecline } = reduce(state, { type: "DECLINE_BUY", playerId: "p1" });
+    expect(afterDecline.pendingAuction?.turnPlayerId).toBe("p2");
+
+    const { state: afterBid } = reduce(afterDecline, { type: "PLACE_BID", playerId: "p2", amount: 1_000 });
+    expect(afterBid.pendingAuction?.highestBidderId).toBe("p2");
+    expect(afterBid.pendingAuction?.turnPlayerId).toBe("p1");
+
+    const { state: afterPass, events } = reduce(afterBid, { type: "PASS_AUCTION", playerId: "p1" });
+    expect(afterPass.pendingAuction).toBeNull();
+    expect(afterPass.ownership[1]).toEqual({ ownerId: "p2", houses: 0, hotel: false, mortgaged: false });
+    expect(afterPass.players[1].cashCents).toBe(100_000 - 1_000);
+    expect(events.some((e) => e.type === "AUCTION_WON")).toBe(true);
+  });
+
+  it("collectRentWhileJailed: rent is skipped when the owner is jailed and the setting is OFF", () => {
+    function rentCollected(collectRentWhileJailed: boolean): number {
+      const state = makeState(
+        [makePlayer("p1", 0, { inJail: true, cashCents: 0 }), makePlayer("p2", 1, { position: 0, cashCents: 100_000 })],
+        {
+          currentPlayerIndex: 1,
+          settings: { ...DEFAULT_SETTINGS, collectRentWhileJailed },
+          ownership: { 1: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false } },
+        },
+      );
+      const { state: next } = reduce(state, { type: "ROLL", playerId: "p2", d1: 1, d2: 0 });
+      return next.players[0].cashCents;
+    }
+    expect(rentCollected(true)).toBeGreaterThan(0);
+    expect(rentCollected(false)).toBe(0);
+  });
+
+  it("mortgageEnabled: MORTGAGE works when ON, is a no-op when OFF", () => {
+    function tryMortgage(mortgageEnabled: boolean): boolean {
+      const state = makeState([makePlayer("p1", 0, { cashCents: 0 })], {
+        settings: { ...DEFAULT_SETTINGS, mortgageEnabled },
+        ownership: { 1: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false } },
+      });
+      const { state: next } = reduce(state, { type: "MORTGAGE", playerId: "p1", spaceIndex: 1 });
+      return next.ownership[1].mortgaged;
+    }
+    expect(tryMortgage(true)).toBe(true);
+    expect(tryMortgage(false)).toBe(false);
+  });
+
+  it("evenBuild: building unevenly across a set is rejected when ON, allowed when OFF", () => {
+    function houseCountAfterUnevenBuild(evenBuild: boolean): number {
+      const state = makeState([makePlayer("p1", 0, { cashCents: 100_000 })], {
+        settings: { ...DEFAULT_SETTINGS, evenBuild },
+        ownership: {
+          1: { ownerId: "p1", houses: 1, hotel: false, mortgaged: false },
+          3: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false },
+        },
+      });
+      const { state: next } = reduce(state, { type: "BUILD_HOUSE", playerId: "p1", spaceIndex: 1 });
+      return next.ownership[1].houses;
+    }
+    expect(houseCountAfterUnevenBuild(true)).toBe(1); // rejected
+    expect(houseCountAfterUnevenBuild(false)).toBe(2); // allowed
+  });
+
+  it("allowManualBankruptcy: voluntary DECLARE_BANKRUPT with no debt works when ON, is a no-op when OFF", () => {
+    function tryVoluntaryBankruptcy(allowManualBankruptcy: boolean): boolean {
+      const state = makeState([makePlayer("p1", 0, { cashCents: 10_000 }), makePlayer("p2", 1)], {
+        settings: { ...DEFAULT_SETTINGS, allowManualBankruptcy },
+      });
+      const { state: next } = reduce(state, { type: "DECLARE_BANKRUPT", playerId: "p1" });
+      return next.players[0].bankrupt;
+    }
+    expect(tryVoluntaryBankruptcy(true)).toBe(true);
+    expect(tryVoluntaryBankruptcy(false)).toBe(false);
+  });
+
+  it("bankruptcyTransfersAssets: properties transfer to the creditor when ON, return to the market when OFF", () => {
+    function ownerAfterBankruptcy(bankruptcyTransfersAssets: boolean) {
+      const state = makeState([makePlayer("p1", 0, { cashCents: 0 }), makePlayer("p2", 1, { cashCents: 0 })], {
+        settings: { ...DEFAULT_SETTINGS, bankruptcyTransfersAssets },
+        turnPhase: "awaiting_payment",
+        pendingDebt: { amount: 10_000, creditorId: "p2", reason: "rent" },
+        ownership: { 1: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false } },
+      });
+      const { state: next, events } = reduce(state, { type: "DECLARE_BANKRUPT", playerId: "p1" });
+      return { ownership: next.ownership[1], events };
+    }
+    const on = ownerAfterBankruptcy(true);
+    expect(on.ownership?.ownerId).toBe("p2");
+
+    const off = ownerAfterBankruptcy(false);
+    expect(off.ownership).toBeUndefined();
+    expect(off.events.some((e) => e.type === "PROPERTIES_RETURNED_TO_MARKET")).toBe(true);
+  });
+
+  it("tradingEnabled: PROPOSE_TRADE creates a trade when ON, is a no-op when OFF", () => {
+    function tradeCount(tradingEnabled: boolean): number {
+      const state = makeState([makePlayer("p1", 0, { cashCents: 10_000 }), makePlayer("p2", 1, { cashCents: 10_000 })], {
+        settings: { ...DEFAULT_SETTINGS, tradingEnabled },
+      });
+      const { state: next } = reduce(state, {
+        type: "PROPOSE_TRADE",
+        fromPlayerId: "p1",
+        toPlayerId: "p2",
+        give: { cashCents: 1_000, spaceIndexes: [], jailFreeCards: 0 },
+        receive: { cashCents: 0, spaceIndexes: [], jailFreeCards: 0 },
+      });
+      return next.trades.length;
+    }
+    expect(tradeCount(true)).toBe(1);
+    expect(tradeCount(false)).toBe(0);
+  });
+
+  describe("UPDATE_SETTINGS", () => {
+    it("only the host can change settings", () => {
+      const state = makeState([makePlayer("p1", 0), makePlayer("p2", 1)], { status: "lobby", hostPlayerId: "p1" });
+      const { events } = reduce(state, { type: "UPDATE_SETTINGS", playerId: "p2", settings: { freeParkingCash: true } });
+      expect(events).toHaveLength(0);
+    });
+
+    it("the host can change settings while still in the lobby", () => {
+      const state = makeState([makePlayer("p1", 0), makePlayer("p2", 1)], { status: "lobby", hostPlayerId: "p1" });
+      const { state: next, events } = reduce(state, {
+        type: "UPDATE_SETTINGS",
+        playerId: "p1",
+        settings: { freeParkingCash: true },
+      });
+      expect(next.settings.freeParkingCash).toBe(true);
+      expect(events).toHaveLength(1);
+    });
+
+    it("settings are frozen once the game is active", () => {
+      const state = makeState([makePlayer("p1", 0), makePlayer("p2", 1)], { status: "active", hostPlayerId: "p1" });
+      const { events } = reduce(state, { type: "UPDATE_SETTINGS", playerId: "p1", settings: { freeParkingCash: true } });
+      expect(events).toHaveLength(0);
+    });
+
+    it("rejects lowering maxPlayers below the current seat count", () => {
+      const state = makeState([makePlayer("p1", 0), makePlayer("p2", 1), makePlayer("p3", 2)], {
+        status: "lobby",
+        hostPlayerId: "p1",
+      });
+      const { state: next, events } = reduce(state, {
+        type: "UPDATE_SETTINGS",
+        playerId: "p1",
+        settings: { maxPlayers: 2 },
+      });
+      expect(events).toHaveLength(0);
+      expect(next.settings.maxPlayers).toBe(DEFAULT_SETTINGS.maxPlayers);
+    });
   });
 });

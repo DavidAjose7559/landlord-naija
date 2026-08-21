@@ -7,6 +7,8 @@ import {
   GO_SALARY,
   HOUSE_COST_BY_GROUP,
   JAIL_INDEX,
+  MAX_PLAYERS,
+  MIN_PLAYERS,
   TRANSPORT_INDEXES,
   TRANSPORT_RENT,
   UTILITY_INDEXES,
@@ -18,8 +20,8 @@ import {
 } from "./board";
 import type { Card, CardEffect } from "./cards";
 import { MAPS } from "./maps";
-import type { MapId } from "./maps/types";
 import type {
+  GameSettings,
   GameState,
   PendingDebt,
   PlayerState,
@@ -37,10 +39,10 @@ const BOARD_SIZE = 40;
 
 // The 40-space skeleton (which index is which SpaceType) is identical on
 // every map, so board *content* is the only thing that varies per game —
-// looked up fresh from state.mapId wherever it's needed, rather than
-// imported as a fixed module-level constant.
+// looked up fresh from state.settings.mapId wherever it's needed, rather
+// than imported as a fixed module-level constant.
 function boardOf(state: GameState): readonly Space[] {
-  return MAPS[state.mapId].spaces;
+  return MAPS[state.settings.mapId].spaces;
 }
 
 // ============================================================================
@@ -49,9 +51,12 @@ function boardOf(state: GameState): readonly Space[] {
 
 export type GameAction =
   | { type: "START_GAME" }
+  | { type: "UPDATE_SETTINGS"; playerId: string; settings: Partial<GameSettings> }
   | { type: "ROLL"; playerId: string; d1: number; d2: number }
   | { type: "BUY"; playerId: string }
   | { type: "DECLINE_BUY"; playerId: string }
+  | { type: "PLACE_BID"; playerId: string; amount: number }
+  | { type: "PASS_AUCTION"; playerId: string }
   | { type: "PAY_RENT"; playerId: string }
   | { type: "DRAW_CARD"; playerId: string; cardId: string }
   | { type: "BUILD_HOUSE"; playerId: string; spaceIndex: number }
@@ -62,6 +67,7 @@ export type GameAction =
   | { type: "PAY_JAIL_FINE"; playerId: string }
   | { type: "USE_JAIL_FREE"; playerId: string }
   | { type: "END_TURN"; playerId: string }
+  | { type: "FORCE_END_TURN"; playerId: string }
   | { type: "DECLARE_BANKRUPT"; playerId: string }
   | {
       type: "PROPOSE_TRADE";
@@ -75,13 +81,20 @@ export type GameAction =
 
 export type GameEvent =
   | { type: "GAME_STARTED" }
+  | { type: "SETTINGS_UPDATED" }
   | { type: "ROLLED"; playerId: string; d1: number; d2: number; isDoubles: boolean }
   | { type: "PASSED_GO"; playerId: string; amount: number }
   | { type: "MOVED"; playerId: string; from: number; to: number }
   | { type: "PROPERTY_PURCHASED"; playerId: string; spaceIndex: number; price: number }
   | { type: "PROPERTY_DECLINED"; playerId: string; spaceIndex: number }
+  | { type: "AUCTION_STARTED"; spaceIndex: number }
+  | { type: "BID_PLACED"; playerId: string; amount: number }
+  | { type: "AUCTION_PASSED"; playerId: string }
+  | { type: "AUCTION_WON"; playerId: string; spaceIndex: number; amount: number }
+  | { type: "AUCTION_ENDED_NO_WINNER"; spaceIndex: number }
   | { type: "RENT_PAID"; payerId: string; payeeId: string; spaceIndex: number; amount: number }
   | { type: "TAX_PAID"; playerId: string; amount: number }
+  | { type: "FREE_PARKING_PAID"; playerId: string; amount: number }
   | { type: "CARD_DRAWN"; playerId: string; deck: Deck; cardId: string; text: string }
   | { type: "DEBT_PENDING"; playerId: string; amount: number; creditorId: string; reason: string }
   | { type: "HOUSE_BUILT"; playerId: string; spaceIndex: number; houses: number; hotel: boolean }
@@ -91,7 +104,9 @@ export type GameEvent =
   | { type: "SENT_TO_JAIL"; playerId: string; reason: string }
   | { type: "JAIL_ESCAPED"; playerId: string; method: "doubles" | "fine" | "card" }
   | { type: "TURN_ENDED"; playerId: string }
+  | { type: "TURN_TIMED_OUT"; playerId: string }
   | { type: "PLAYER_BANKRUPT"; playerId: string; creditorId: string | "bank" }
+  | { type: "PROPERTIES_RETURNED_TO_MARKET"; playerId: string }
   | { type: "GAME_OVER"; winnerPlayerId: string }
   | { type: "TRADE_PROPOSED"; tradeId: number }
   | { type: "TRADE_ACCEPTED"; tradeId: number }
@@ -102,9 +117,10 @@ export type GameEvent =
 // joined. The caller (API layer) pushes players into `players` directly
 // as they join — that's a lobby-only operation, not a GameAction, since
 // joining isn't part of the in-progress turn state machine.
-export function createInitialGameState(mapId: MapId): GameState {
+export function createInitialGameState(settings: GameSettings): GameState {
   return {
-    mapId,
+    settings,
+    hostPlayerId: null,
     status: "lobby",
     turnPhase: "awaiting_roll",
     currentPlayerIndex: 0,
@@ -117,6 +133,9 @@ export function createInitialGameState(mapId: MapId): GameState {
     pendingCardDeck: null,
     pendingTaxChoice: null,
     pendingDebt: null,
+    pendingAuction: null,
+    freeParkingPot: 0,
+    turnStartedAt: null,
     trades: [],
     nextTradeId: 1,
   };
@@ -231,7 +250,11 @@ function getMortgageableSpace(
 function computePropertyRent(state: GameState, space: PropertySpace, own: PropertyOwnership): number {
   const tierIndex = own.hotel ? 5 : own.houses;
   let rent = space.rent[tierIndex];
-  if (tierIndex === 0 && ownsFullUnmortgagedGroup(state, own.ownerId, space.color)) {
+  if (
+    tierIndex === 0 &&
+    state.settings.doubleRentOnFullSet &&
+    ownsFullUnmortgagedGroup(state, own.ownerId, space.color)
+  ) {
     rent *= 2;
   }
   return rent;
@@ -272,6 +295,8 @@ function chargeOrDefer(
     if (creditorId !== "bank") {
       const creditor = findPlayer(state, creditorId);
       if (creditor) creditor.cashCents += amount;
+    } else if (state.settings.freeParkingCash) {
+      state.freeParkingPot += amount;
     }
   } else {
     state.pendingDebt = { amount, creditorId, reason };
@@ -337,8 +362,17 @@ function resolveLanding(state: GameState, player: PlayerState, events: GameEvent
   switch (space.type) {
     case "go":
     case "jail":
-    case "free":
       return;
+
+    case "free": {
+      if (state.settings.freeParkingCash && state.freeParkingPot > 0) {
+        const amount = state.freeParkingPot;
+        state.freeParkingPot = 0;
+        player.cashCents += amount;
+        events.push({ type: "FREE_PARKING_PAID", playerId: player.id, amount });
+      }
+      return;
+    }
 
     case "gotojail":
       sendToJail(player, "landed on Go To Kirikiri", events);
@@ -373,6 +407,10 @@ function resolveLanding(state: GameState, player: PlayerState, events: GameEvent
       }
       if (own.ownerId === player.id || own.mortgaged) {
         return;
+      }
+      if (!state.settings.collectRentWhileJailed) {
+        const owner = findPlayer(state, own.ownerId);
+        if (owner?.inJail) return;
       }
       const rent =
         space.type === "property"
@@ -550,7 +588,7 @@ function canBuildHouse(state: GameState, playerId: string, spaceIndex: number): 
   const group = ownedPropertyIndexesInGroup(state, space.color);
   const levels = group.map((idx) => groupHouseLevel(state, idx));
   const thisLevel = groupHouseLevel(state, spaceIndex);
-  if (thisLevel !== Math.min(...levels)) return false; // even build rule
+  if (state.settings.evenBuild && thisLevel !== Math.min(...levels)) return false; // even build rule
 
   if (thisLevel < 4) {
     return totalHousesInPlay(state) < MAX_HOUSES_IN_BANK;
@@ -569,7 +607,7 @@ function canSellHouse(state: GameState, playerId: string, spaceIndex: number): b
 
   const group = ownedPropertyIndexesInGroup(state, space.color);
   const levels = group.map((idx) => groupHouseLevel(state, idx));
-  if (thisLevel !== Math.max(...levels)) return false; // even sell rule
+  if (state.settings.evenBuild && thisLevel !== Math.max(...levels)) return false; // even sell rule
   if (thisLevel === 5) {
     return totalHousesInPlay(state) + 4 <= MAX_HOUSES_IN_BANK;
   }
@@ -607,11 +645,14 @@ function resolveBankruptcy(
   }
 
   const creditor = creditorId !== "bank" ? findPlayer(state, creditorId) : undefined;
+  const transferToCreditor = state.settings.bankruptcyTransfersAssets && creditor !== undefined;
+  let hadProperties = false;
 
   for (const [idxStr, own] of Object.entries(state.ownership)) {
     if (own.ownerId !== player.id) continue;
+    hadProperties = true;
     const idx = Number(idxStr);
-    if (creditor) {
+    if (transferToCreditor && creditor) {
       own.ownerId = creditor.id;
     } else {
       delete state.ownership[idx];
@@ -620,13 +661,18 @@ function resolveBankruptcy(
 
   if (creditor) {
     creditor.cashCents += player.cashCents;
-    creditor.jailFreeCards += player.jailFreeCards;
+    if (transferToCreditor) {
+      creditor.jailFreeCards += player.jailFreeCards;
+    }
   }
 
   player.cashCents = 0;
   player.jailFreeCards = 0;
   player.bankrupt = true;
   events.push({ type: "PLAYER_BANKRUPT", playerId: player.id, creditorId });
+  if (!transferToCreditor && hadProperties) {
+    events.push({ type: "PROPERTIES_RETURNED_TO_MARKET", playerId: player.id });
+  }
 
   if (state.pendingDebt) {
     state.pendingDebt = null;
@@ -757,8 +803,105 @@ function handleBuy(state: GameState, playerId: string, events: GameEvent[]): voi
 function handleDeclineBuy(state: GameState, playerId: string, events: GameEvent[]): void {
   const player = currentPlayer(state);
   if (player.id !== playerId || state.turnPhase !== "awaiting_purchase") return;
-  events.push({ type: "PROPERTY_DECLINED", playerId: player.id, spaceIndex: player.position });
+  const spaceIndex = player.position;
+  events.push({ type: "PROPERTY_DECLINED", playerId: player.id, spaceIndex });
+  if (state.settings.auctionOnDecline) {
+    startAuction(state, spaceIndex, events);
+    return;
+  }
   state.turnPhase = nextPhaseAfterResolution(state);
+}
+
+// ============================================================================
+// auctions (settings.auctionOnDecline)
+// ============================================================================
+
+function startAuction(state: GameState, spaceIndex: number, events: GameEvent[]): void {
+  const eligiblePlayerIds = state.players.filter((p) => !p.bankrupt).map((p) => p.id);
+  if (eligiblePlayerIds.length === 0) return;
+  const startIndex = nextActivePlayerIndex(state.players, state.currentPlayerIndex);
+  state.pendingAuction = {
+    spaceIndex,
+    highestBid: 0,
+    highestBidderId: null,
+    eligiblePlayerIds,
+    turnPlayerId: state.players[startIndex].id,
+  };
+  state.turnPhase = "awaiting_auction";
+  events.push({ type: "AUCTION_STARTED", spaceIndex });
+}
+
+function advanceAuctionTurn(state: GameState): void {
+  const auction = state.pendingAuction;
+  if (!auction) return;
+  const order = state.players.filter((p) => auction.eligiblePlayerIds.includes(p.id));
+  if (order.length === 0) return;
+  const currentIdx = order.findIndex((p) => p.id === auction.turnPlayerId);
+  const next = order[(currentIdx + 1) % order.length];
+  auction.turnPlayerId = next.id;
+}
+
+function finishAuction(state: GameState, events: GameEvent[]): void {
+  const auction = state.pendingAuction;
+  if (!auction) return;
+
+  if (auction.highestBidderId) {
+    const winner = findPlayer(state, auction.highestBidderId);
+    if (winner) {
+      winner.cashCents -= auction.highestBid;
+      state.ownership[auction.spaceIndex] = {
+        ownerId: winner.id,
+        houses: 0,
+        hotel: false,
+        mortgaged: false,
+      };
+      events.push({
+        type: "AUCTION_WON",
+        playerId: winner.id,
+        spaceIndex: auction.spaceIndex,
+        amount: auction.highestBid,
+      });
+    }
+  } else {
+    events.push({ type: "AUCTION_ENDED_NO_WINNER", spaceIndex: auction.spaceIndex });
+  }
+
+  state.pendingAuction = null;
+  state.turnPhase = nextPhaseAfterResolution(state);
+}
+
+function handlePlaceBid(
+  state: GameState,
+  action: Extract<GameAction, { type: "PLACE_BID" }>,
+  events: GameEvent[],
+): void {
+  const auction = state.pendingAuction;
+  if (!auction || state.turnPhase !== "awaiting_auction") return;
+  if (auction.turnPlayerId !== action.playerId) return;
+  const player = findPlayer(state, action.playerId);
+  if (!player) return;
+  if (action.amount <= auction.highestBid) return;
+  if (player.cashCents < action.amount) return;
+
+  auction.highestBid = action.amount;
+  auction.highestBidderId = action.playerId;
+  events.push({ type: "BID_PLACED", playerId: action.playerId, amount: action.amount });
+  advanceAuctionTurn(state);
+}
+
+function handlePassAuction(state: GameState, playerId: string, events: GameEvent[]): void {
+  const auction = state.pendingAuction;
+  if (!auction || state.turnPhase !== "awaiting_auction") return;
+  if (auction.turnPlayerId !== playerId) return;
+
+  auction.eligiblePlayerIds = auction.eligiblePlayerIds.filter((id) => id !== playerId);
+  events.push({ type: "AUCTION_PASSED", playerId });
+
+  if (auction.eligiblePlayerIds.length <= 1) {
+    finishAuction(state, events);
+  } else {
+    advanceAuctionTurn(state);
+  }
 }
 
 // Resolves a choice tax space (e.g. Income Tax: flat $200 or 10% of net
@@ -801,6 +944,8 @@ function handlePayRent(state: GameState, playerId: string, events: GameEvent[]):
   if (creditorId !== "bank") {
     const creditor = findPlayer(state, creditorId);
     if (creditor) creditor.cashCents += amount;
+  } else if (state.settings.freeParkingCash) {
+    state.freeParkingPot += amount;
   }
   state.pendingDebt = null;
   if (reason === "rent") {
@@ -819,7 +964,7 @@ function handleDrawCard(
   const player = currentPlayer(state);
   if (player.id !== action.playerId || state.turnPhase !== "awaiting_card" || !state.pendingCardDeck) return;
 
-  const deck = MAPS[state.mapId].decks[state.pendingCardDeck];
+  const deck = MAPS[state.settings.mapId].decks[state.pendingCardDeck];
   const card = deck.find((c) => c.id === action.cardId);
   if (!card) return;
 
@@ -878,6 +1023,7 @@ function handleSellHouse(state: GameState, playerId: string, spaceIndex: number,
 }
 
 function handleMortgage(state: GameState, playerId: string, spaceIndex: number, events: GameEvent[]): void {
+  if (!state.settings.mortgageEnabled) return;
   const own = state.ownership[spaceIndex];
   const space = getMortgageableSpace(state, spaceIndex);
   if (!own || !space || own.ownerId !== playerId || own.mortgaged) return;
@@ -937,9 +1083,50 @@ function handleEndTurn(state: GameState, playerId: string, events: GameEvent[]):
   state.turnPhase = "awaiting_roll";
 }
 
+// (settings.turnTimeLimitSeconds) Forces the current turn to end when the
+// caller (API layer, which owns wall-clock time) has verified turnStartedAt
+// is old enough. Only fires from a phase with nothing left unresolved — an
+// open debt, tax choice, card draw, purchase decision, or auction always
+// wins over the clock; the timer just skips a player who won't roll/end.
+function handleForceEndTurn(state: GameState, playerId: string, events: GameEvent[]): void {
+  const player = currentPlayer(state);
+  if (player.id !== playerId) return;
+  if (state.turnPhase !== "awaiting_roll" && state.turnPhase !== "awaiting_end_turn") return;
+
+  events.push({ type: "TURN_TIMED_OUT", playerId });
+  state.currentPlayerIndex = nextActivePlayerIndex(state.players, state.currentPlayerIndex);
+  state.doublesCount = 0;
+  state.lastRoll = null;
+  state.turnPhase = "awaiting_roll";
+}
+
+// Host-only, lobby-only. Rejected outright once the game is active — settings
+// freeze at start per the spec ("reject any mutation with a clear error");
+// the caller surfaces a message using the fact this was a no-op.
+function handleUpdateSettings(
+  state: GameState,
+  action: Extract<GameAction, { type: "UPDATE_SETTINGS" }>,
+  events: GameEvent[],
+): void {
+  if (state.status !== "lobby") return;
+  if (state.hostPlayerId !== action.playerId) return;
+
+  const patch = action.settings;
+  if (patch.maxPlayers !== undefined) {
+    if (patch.maxPlayers < MIN_PLAYERS || patch.maxPlayers > MAX_PLAYERS) return;
+    if (patch.maxPlayers < state.players.length) return;
+  }
+
+  state.settings = { ...state.settings, ...patch };
+  events.push({ type: "SETTINGS_UPDATED" });
+}
+
 function handleDeclareBankrupt(state: GameState, playerId: string, events: GameEvent[]): void {
   const player = findPlayer(state, playerId);
   if (!player || player.bankrupt) return;
+  const hasPendingDebt =
+    state.pendingDebt !== null && state.turnPhase === "awaiting_payment" && currentPlayer(state).id === playerId;
+  if (!hasPendingDebt && !state.settings.allowManualBankruptcy) return;
   const creditorId = state.pendingDebt?.creditorId ?? "bank";
   resolveBankruptcy(state, player, creditorId, events);
 }
@@ -962,6 +1149,7 @@ function handleProposeTrade(
   action: Extract<GameAction, { type: "PROPOSE_TRADE" }>,
   events: GameEvent[],
 ): void {
+  if (!state.settings.tradingEnabled) return;
   if (!tradeOfferValid(state, action.fromPlayerId, action.give)) return;
   if (!tradeOfferValid(state, action.toPlayerId, action.receive)) return;
 
@@ -1029,6 +1217,9 @@ export function reduce(state: GameState, action: GameAction): { state: GameState
       draft.doublesCount = 0;
       events.push({ type: "GAME_STARTED" });
       break;
+    case "UPDATE_SETTINGS":
+      handleUpdateSettings(draft, action, events);
+      break;
     case "ROLL":
       handleRoll(draft, action, events);
       break;
@@ -1037,6 +1228,12 @@ export function reduce(state: GameState, action: GameAction): { state: GameState
       break;
     case "DECLINE_BUY":
       handleDeclineBuy(draft, action.playerId, events);
+      break;
+    case "PLACE_BID":
+      handlePlaceBid(draft, action, events);
+      break;
+    case "PASS_AUCTION":
+      handlePassAuction(draft, action.playerId, events);
       break;
     case "PAY_RENT":
       handlePayRent(draft, action.playerId, events);
@@ -1067,6 +1264,9 @@ export function reduce(state: GameState, action: GameAction): { state: GameState
       break;
     case "END_TURN":
       handleEndTurn(draft, action.playerId, events);
+      break;
+    case "FORCE_END_TURN":
+      handleForceEndTurn(draft, action.playerId, events);
       break;
     case "DECLARE_BANKRUPT":
       handleDeclareBankrupt(draft, action.playerId, events);

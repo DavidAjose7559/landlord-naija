@@ -1,7 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { DEFAULT_STARTING_CASH, MAX_PLAYERS } from "@/game/board";
 import type { PlayerState } from "@/game/types";
 import { callRpc, loadGameByRoomCode } from "@/lib/api/game-state";
 import { ApiError, errorResponse } from "@/lib/api/errors";
@@ -27,7 +26,7 @@ export async function POST(request: Request, context: { params: Promise<{ code: 
       // hard failure — see the board page's spectating banner.
       throw new ApiError(409, "game has already started — you can watch from the board instead");
     }
-    if (game.state.players.length >= MAX_PLAYERS) {
+    if (game.state.players.length >= game.state.settings.maxPlayers) {
       throw new ApiError(409, "game is full");
     }
     if (game.state.players.some((p) => p.token === body.token)) {
@@ -38,13 +37,14 @@ export async function POST(request: Request, context: { params: Promise<{ code: 
     // Same construction as the server seed: a real secret, not a UUID.
     const clientToken = randomBytes(32).toString("hex");
     const seatIndex = game.state.players.length;
+    const startingCashCents = game.state.settings.startingCashCents;
 
     const newPlayer: PlayerState = {
       id: playerId,
       name: body.name,
       token: body.token,
       seatIndex,
-      cashCents: DEFAULT_STARTING_CASH,
+      cashCents: startingCashCents,
       position: 0,
       inJail: false,
       jailTurns: 0,
@@ -52,7 +52,14 @@ export async function POST(request: Request, context: { params: Promise<{ code: 
       bankrupt: false,
     };
 
-    const newState = { ...game.state, players: [...game.state.players, newPlayer] };
+    // The first player to join becomes host (see UPDATE_SETTINGS /
+    // LEAVE_LOBBY promotion — a game has no players yet when it's created,
+    // so this is the earliest point a host can meaningfully exist).
+    const newState = {
+      ...game.state,
+      players: [...game.state.players, newPlayer],
+      hostPlayerId: game.state.hostPlayerId ?? playerId,
+    };
 
     await callRpc("join_game", {
       p_game_id: game.id,
@@ -60,7 +67,7 @@ export async function POST(request: Request, context: { params: Promise<{ code: 
       p_name: body.name,
       p_token: body.token,
       p_seat_index: seatIndex,
-      p_cash_cents: DEFAULT_STARTING_CASH,
+      p_cash_cents: startingCashCents,
       p_client_token: clientToken,
       p_new_state: newState,
     });

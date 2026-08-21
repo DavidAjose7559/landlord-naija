@@ -4,7 +4,7 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ClientAction } from "@/lib/api/client-action";
 import type { PublicGame } from "@/lib/api/public-game";
-import { loadSession, saveSession, type PlayerSession } from "@/lib/session";
+import { clearSession, loadSession, saveSession, type PlayerSession } from "@/lib/session";
 import { supabase } from "@/lib/supabase/client";
 
 export interface ActionResult {
@@ -19,7 +19,7 @@ export interface UseGameResult {
   pending: boolean;
   reconnecting: boolean;
   session: PlayerSession | null;
-  setSession: (session: PlayerSession) => void;
+  setSession: (session: PlayerSession | null) => void;
   dispatch: (action: ClientAction) => Promise<ActionResult | null>;
   refetch: () => Promise<void>;
 }
@@ -62,8 +62,12 @@ export function useGame(roomCode: string): UseGameResult {
   }, [roomCode]);
 
   const setSession = useCallback(
-    (next: PlayerSession) => {
-      saveSession(roomCode, next);
+    (next: PlayerSession | null) => {
+      if (next) {
+        saveSession(roomCode, next);
+      } else {
+        clearSession(roomCode);
+      }
       sessionRef.current = next;
       setSessionState(next);
     },

@@ -72,6 +72,16 @@ export async function loadGameByRoomCode(roomCode: string): Promise<GameRow> {
   return mapGameRow(data as GamesPublicRow);
 }
 
+// (settings.privateRoom) Rooms the host left discoverable. Filters in JS
+// rather than in SQL on the jsonb field — the fake test client only
+// supports simple column equality, and this list is small/infrequent
+// enough that it doesn't need a dedicated index-backed query.
+export async function loadPublicLobbies(): Promise<GameRow[]> {
+  const { data, error } = await supabaseAdmin.from("games_public").select("*").eq("status", "lobby");
+  if (error) throw new ApiError(500, "failed to load public games");
+  return ((data ?? []) as GamesPublicRow[]).map(mapGameRow).filter((g) => !g.state.settings.privateRoom);
+}
+
 export function gameRowToPublicJson(row: GameRow): PublicGame {
   return {
     id: row.id,

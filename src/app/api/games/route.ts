@@ -3,23 +3,49 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createServerSeed } from "@/game/dice";
 import { createInitialGameState } from "@/game/engine";
+import { DEFAULT_SETTINGS } from "@/game/types";
 import { callRpc } from "@/lib/api/game-state";
 import { ApiError, errorResponse } from "@/lib/api/errors";
 import { generateRoomCode } from "@/lib/api/room-code";
 import { parseJsonBody } from "@/lib/api/validate";
 
-const createGameSchema = z.object({}).strict();
+// Every field optional — the host can configure the room from the lobby
+// (see UPDATE_SETTINGS) instead, this just saves a round trip when they
+// already know what they want at creation time.
+const createGameSchema = z
+  .object({
+    settings: z
+      .object({
+        mapId: z.enum(["naija", "worldTour", "canada", "classic"]),
+        maxPlayers: z.number().int().min(2).max(8),
+        privateRoom: z.boolean(),
+        startingCashCents: z.number().int().positive(),
+        randomizePlayerOrder: z.boolean(),
+        doubleRentOnFullSet: z.boolean(),
+        freeParkingCash: z.boolean(),
+        auctionOnDecline: z.boolean(),
+        collectRentWhileJailed: z.boolean(),
+        mortgageEnabled: z.boolean(),
+        evenBuild: z.boolean(),
+        allowManualBankruptcy: z.boolean(),
+        bankruptcyTransfersAssets: z.boolean(),
+        tradingEnabled: z.boolean(),
+        turnTimeLimitSeconds: z.number().int().min(0),
+      })
+      .partial()
+      .optional(),
+  })
+  .strict();
 
 const MAX_ROOM_CODE_ATTEMPTS = 5;
 
 export async function POST(request: Request) {
   try {
-    await parseJsonBody(request, createGameSchema);
+    const body = await parseJsonBody(request, createGameSchema);
 
     const { seed, hash } = createServerSeed();
-    // Defaults to the naija map for now; game settings (including map
-    // choice, configured in the lobby before start) layer on top of this.
-    const state = createInitialGameState("naija");
+    const settings = { ...DEFAULT_SETTINGS, ...body.settings };
+    const state = createInitialGameState(settings);
     const gameId = randomUUID();
 
     let roomCode = generateRoomCode();

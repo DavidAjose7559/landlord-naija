@@ -22,8 +22,19 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 
 // Trade actions are inherently between two players and aren't turn-locked
 // by design (see engine.ts); neither is DECLARE_BANKRUPT — a player can
-// bail out even when it isn't their turn.
-const TURN_EXEMPT_ACTIONS = new Set(["PROPOSE_TRADE", "ACCEPT_TRADE", "DECLINE_TRADE", "DECLARE_BANKRUPT"]);
+// bail out even when it isn't their turn. Auction bids/passes are gated by
+// pendingAuction.turnPlayerId instead of currentPlayerIndex (engine.ts
+// enforces that itself); FORCE_END_TURN can be triggered by any player
+// once the clock has actually run out, not just the stuck player.
+const TURN_EXEMPT_ACTIONS = new Set([
+  "PROPOSE_TRADE",
+  "ACCEPT_TRADE",
+  "DECLINE_TRADE",
+  "DECLARE_BANKRUPT",
+  "PLACE_BID",
+  "PASS_AUCTION",
+  "FORCE_END_TURN",
+]);
 
 const RATE_LIMIT = 20;
 const RATE_WINDOW_MS = 10_000;
@@ -79,7 +90,7 @@ async function resolveConcreteAction(
       }
       const deckState = await loadDeckState(game.id);
       if (!deckState) throw new ApiError(500, "deck state missing");
-      const { cardId, newDeckState } = drawNextCardId(deckState, game.state.pendingCardDeck, game.state.mapId);
+      const { cardId, newDeckState } = drawNextCardId(deckState, game.state.pendingCardDeck, game.state.settings.mapId);
       return {
         action: { type: "DRAW_CARD", playerId: player.id, cardId },
         rollPayload: null,
@@ -125,8 +136,32 @@ async function resolveConcreteAction(
         deckStatePayload: null,
       };
 
+    case "PLACE_BID":
+      return {
+        action: { type: "PLACE_BID", playerId: player.id, amount: action.amount },
+        rollPayload: null,
+        deckStatePayload: null,
+      };
+
+    case "FORCE_END_TURN": {
+      const limitSeconds = game.state.settings.turnTimeLimitSeconds;
+      if (limitSeconds <= 0) throw new ApiError(409, "no turn time limit is set");
+      const startedAt = game.state.turnStartedAt;
+      if (!startedAt || Date.now() - startedAt < limitSeconds * 1000) {
+        throw new ApiError(409, "the current turn hasn't timed out yet");
+      }
+      const currentPlayerId = game.state.players[game.state.currentPlayerIndex]?.id;
+      if (!currentPlayerId) throw new ApiError(409, "no current player");
+      return {
+        action: { type: "FORCE_END_TURN", playerId: currentPlayerId },
+        rollPayload: null,
+        deckStatePayload: null,
+      };
+    }
+
     case "BUY":
     case "DECLINE_BUY":
+    case "PASS_AUCTION":
     case "PAY_RENT":
     case "PAY_JAIL_FINE":
     case "USE_JAIL_FREE":
@@ -168,7 +203,14 @@ export async function POST(request: Request, context: { params: Promise<{ code: 
       body.action,
     );
 
-    const { state: newState, events } = reduce(game.state, concreteAction);
+    const { state: reducedState, events } = reduce(game.state, concreteAction);
+    // (settings.turnTimeLimitSeconds) reduce() can't call Date.now() and
+    // stay pure, so the turn clock is stamped here whenever the active
+    // player actually changes.
+    const newState =
+      reducedState.currentPlayerIndex !== game.state.currentPlayerIndex
+        ? { ...reducedState, turnStartedAt: Date.now() }
+        : reducedState;
 
     if (events.length === 0) {
       // Well-formed request, but the engine rejected it (illegal move,

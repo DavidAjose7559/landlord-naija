@@ -91,8 +91,8 @@ export default function BoardPage() {
       <EventLog
         gameId={game.id}
         players={game.state.players}
-        spaces={MAPS[game.state.mapId].spaces}
-        jailLabel={MAPS[game.state.mapId].jailLabel}
+        spaces={MAPS[game.state.settings.mapId].spaces}
+        jailLabel={MAPS[game.state.settings.mapId].jailLabel}
       />
 
       {pending && <p className="text-center text-xs text-muted">Syncing…</p>}

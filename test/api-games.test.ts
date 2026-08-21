@@ -15,9 +15,12 @@ vi.mock("@/lib/supabase/server", async () => {
 import { POST as createGame } from "@/app/api/games/route";
 import { GET as getGame } from "@/app/api/games/[code]/route";
 import { POST as joinGame } from "@/app/api/games/[code]/join/route";
+import { POST as leaveLobby } from "@/app/api/games/[code]/leave/route";
+import { PATCH as patchSettings } from "@/app/api/games/[code]/settings/route";
 import { POST as startGame } from "@/app/api/games/[code]/start/route";
 import { POST as postAction } from "@/app/api/games/[code]/action/route";
 import { GET as getVerify } from "@/app/api/games/[code]/verify/route";
+import { GET as getPublicGames } from "@/app/api/games/public/route";
 
 const fakeAdmin = supabaseAdmin as unknown as FakeSupabaseAdmin;
 
@@ -38,7 +41,10 @@ function getReq(url: string): Request {
 }
 
 async function createAndJoinTwo() {
-  const createRes = await createGame(postJson("http://test/api/games", {}));
+  // Most of these tests assume a fixed, predictable turn order (host goes
+  // first); randomizePlayerOrder's actual shuffle behavior is covered on
+  // its own in engine.test.ts's settings block.
+  const createRes = await createGame(postJson("http://test/api/games", { settings: { randomizePlayerOrder: false } }));
   const created = await createRes.json();
   const roomCode: string = created.roomCode;
 
@@ -165,6 +171,138 @@ describe("POST /api/games/[code]/start", () => {
     expect(body.turnPhase).toBe("awaiting_roll");
     expect(body.state.players).toHaveLength(2);
   });
+
+  it("randomizePlayerOrder: OFF keeps join order, ON eventually produces a different order", async () => {
+    // OFF is deterministic — assert it directly.
+    const offRes = await createGame(postJson("http://test/api/games", { settings: { randomizePlayerOrder: false } }));
+    const { roomCode: offCode } = await offRes.json();
+    const offHost = await joinGame(postJson(`http://test/api/games/${offCode}/join`, { name: "Ada", token: "danfo" }), ctx(offCode));
+    const offHostBody = await offHost.json();
+    await joinGame(postJson(`http://test/api/games/${offCode}/join`, { name: "Bola", token: "keke" }), ctx(offCode));
+    const offStart = await startGame(postJson(`http://test/api/games/${offCode}/start`, { clientToken: offHostBody.clientToken }), ctx(offCode));
+    const offBody = await offStart.json();
+    expect(offBody.state.players[0].name).toBe("Ada");
+
+    // ON is randomized — across enough trials with 4 players (24 possible
+    // orders), asserting "at least one trial differs from join order" is
+    // effectively non-flaky (odds of 24/24 matches over many trials are
+    // astronomically small).
+    let sawDifferentOrder = false;
+    for (let trial = 0; trial < 20 && !sawDifferentOrder; trial++) {
+      const createRes = await createGame(postJson("http://test/api/games", { settings: { randomizePlayerOrder: true } }));
+      const { roomCode } = await createRes.json();
+      const names = ["Ada", "Bola", "Chidi", "Dupe"];
+      let hostClientToken = "";
+      for (let i = 0; i < names.length; i++) {
+        const joinRes = await joinGame(
+          postJson(`http://test/api/games/${roomCode}/join`, { name: names[i], token: ["danfo", "keke", "jollof", "gele"][i] }),
+          ctx(roomCode),
+        );
+        const joinBody = await joinRes.json();
+        if (i === 0) hostClientToken = joinBody.clientToken;
+      }
+      const startRes = await startGame(postJson(`http://test/api/games/${roomCode}/start`, { clientToken: hostClientToken }), ctx(roomCode));
+      const startBody = await startRes.json();
+      const orderedNames = startBody.state.players.map((p: { name: string }) => p.name);
+      if (JSON.stringify(orderedNames) !== JSON.stringify(names)) sawDifferentOrder = true;
+    }
+    expect(sawDifferentOrder).toBe(true);
+  });
+});
+
+describe("PATCH /api/games/[code]/settings", () => {
+  it("lets the host change a setting while in the lobby", async () => {
+    const setup = await createAndJoinTwo();
+    const res = await patchSettings(
+      postJson(`http://test/api/games/${setup.roomCode}/settings`, {
+        clientToken: setup.host.clientToken,
+        settings: { freeParkingCash: true },
+      }),
+      ctx(setup.roomCode),
+    );
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.state.settings.freeParkingCash).toBe(true);
+  });
+
+  it("rejects a non-host trying to change settings", async () => {
+    const setup = await createAndJoinTwo();
+    const res = await patchSettings(
+      postJson(`http://test/api/games/${setup.roomCode}/settings`, {
+        clientToken: setup.guest.clientToken,
+        settings: { freeParkingCash: true },
+      }),
+      ctx(setup.roomCode),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("rejects changing settings once the game has started", async () => {
+    const setup = await createJoinAndStart();
+    const res = await patchSettings(
+      postJson(`http://test/api/games/${setup.roomCode}/settings`, {
+        clientToken: setup.host.clientToken,
+        settings: { freeParkingCash: true },
+      }),
+      ctx(setup.roomCode),
+    );
+    expect(res.status).toBe(409);
+  });
+});
+
+describe("POST /api/games/[code]/leave", () => {
+  it("promotes the lowest remaining seatIndex when the host leaves", async () => {
+    const setup = await createAndJoinTwo();
+    const res = await leaveLobby(
+      postJson(`http://test/api/games/${setup.roomCode}/leave`, { clientToken: setup.host.clientToken }),
+      ctx(setup.roomCode),
+    );
+    expect(res.status).toBe(200);
+
+    const gameRes = await getGame(getReq(`http://test/api/games/${setup.roomCode}`), ctx(setup.roomCode));
+    const game = await gameRes.json();
+    expect(game.state.players).toHaveLength(1);
+    expect(game.state.hostPlayerId).toBe(setup.guest.playerId);
+  });
+
+  it("a non-host leaving doesn't change who the host is", async () => {
+    const setup = await createAndJoinTwo();
+    await leaveLobby(postJson(`http://test/api/games/${setup.roomCode}/leave`, { clientToken: setup.guest.clientToken }), ctx(setup.roomCode));
+
+    const gameRes = await getGame(getReq(`http://test/api/games/${setup.roomCode}`), ctx(setup.roomCode));
+    const game = await gameRes.json();
+    expect(game.state.players).toHaveLength(1);
+    expect(game.state.hostPlayerId).toBe(setup.host.playerId);
+  });
+});
+
+describe("GET /api/games/public", () => {
+  it("privateRoom: only lists lobbies with privateRoom OFF", async () => {
+    const publicRes = await createGame(postJson("http://test/api/games", { settings: { privateRoom: false } }));
+    const { roomCode: publicCode } = await publicRes.json();
+    const privateRes = await createGame(postJson("http://test/api/games", { settings: { privateRoom: true } }));
+    const { roomCode: privateCode } = await privateRes.json();
+
+    const res = await getPublicGames();
+    const body = await res.json();
+    const codes = body.games.map((g: { roomCode: string }) => g.roomCode);
+    expect(codes).toContain(publicCode);
+    expect(codes).not.toContain(privateCode);
+  });
+});
+
+describe("startingCashCents", () => {
+  it("new players start with the room's configured cash amount, not the default", async () => {
+    const createRes = await createGame(postJson("http://test/api/games", { settings: { startingCashCents: 250_000 } }));
+    const { roomCode } = await createRes.json();
+    const joinRes = await joinGame(postJson(`http://test/api/games/${roomCode}/join`, { name: "Ada", token: "danfo" }), ctx(roomCode));
+    const joinBody = await joinRes.json();
+
+    const gameRes = await getGame(getReq(`http://test/api/games/${roomCode}`), ctx(roomCode));
+    const game = await gameRes.json();
+    const player = game.state.players.find((p: { id: string }) => p.id === joinBody.playerId);
+    expect(player.cashCents).toBe(250_000);
+  });
 });
 
 describe("GET /api/games/[code]", () => {
@@ -264,6 +402,52 @@ describe("POST /api/games/[code]/action", () => {
       lastStatus = res.status;
     }
     expect(lastStatus).toBe(429);
+  });
+
+  it("turnTimeLimitSeconds: OFF rejects FORCE_END_TURN outright; ON only allows it once the clock has actually run out", async () => {
+    const createRes = await createGame(
+      postJson("http://test/api/games", { settings: { randomizePlayerOrder: false, turnTimeLimitSeconds: 60 } }),
+    );
+    const { roomCode } = await createRes.json();
+    const hostJoin = await joinGame(postJson(`http://test/api/games/${roomCode}/join`, { name: "Ada", token: "danfo" }), ctx(roomCode));
+    const host = await hostJoin.json();
+    const guestJoin = await joinGame(postJson(`http://test/api/games/${roomCode}/join`, { name: "Bola", token: "keke" }), ctx(roomCode));
+    const guest = await guestJoin.json();
+    await startGame(postJson(`http://test/api/games/${roomCode}/start`, { clientToken: host.clientToken }), ctx(roomCode));
+
+    // Too soon — turnStartedAt was just set by /start.
+    const tooSoon = await postAction(
+      postJson(`http://test/api/games/${roomCode}/action`, { clientToken: guest.clientToken, action: { type: "FORCE_END_TURN" } }),
+      ctx(roomCode),
+    );
+    expect(tooSoon.status).toBe(409);
+
+    // Simulate the clock having actually run out.
+    const game = fakeAdmin.db.games.find((g) => g.room_code === roomCode)!;
+    game.state.turnStartedAt = Date.now() - 61_000;
+
+    const timedOut = await postAction(
+      postJson(`http://test/api/games/${roomCode}/action`, { clientToken: guest.clientToken, action: { type: "FORCE_END_TURN" } }),
+      ctx(roomCode),
+    );
+    expect(timedOut.status).toBe(200);
+    const timedOutBody = await timedOut.json();
+    expect(timedOutBody.ok).toBe(true);
+
+    // With the setting OFF, FORCE_END_TURN is rejected regardless of time.
+    const offRes = await createGame(postJson("http://test/api/games", { settings: { randomizePlayerOrder: false } }));
+    const { roomCode: offCode } = await offRes.json();
+    const offHostJoin = await joinGame(postJson(`http://test/api/games/${offCode}/join`, { name: "Ada", token: "danfo" }), ctx(offCode));
+    const offHost = await offHostJoin.json();
+    await joinGame(postJson(`http://test/api/games/${offCode}/join`, { name: "Bola", token: "keke" }), ctx(offCode));
+    await startGame(postJson(`http://test/api/games/${offCode}/start`, { clientToken: offHost.clientToken }), ctx(offCode));
+    const offGame = fakeAdmin.db.games.find((g) => g.room_code === offCode)!;
+    offGame.state.turnStartedAt = Date.now() - 1_000_000;
+    const offForce = await postAction(
+      postJson(`http://test/api/games/${offCode}/action`, { clientToken: offHost.clientToken, action: { type: "FORCE_END_TURN" } }),
+      ctx(offCode),
+    );
+    expect(offForce.status).toBe(409);
   });
 });
 

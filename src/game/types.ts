@@ -1,3 +1,4 @@
+import { dollars } from "@/lib/money";
 import type { Deck } from "./board";
 import type { MapId } from "./maps/types";
 
@@ -19,10 +20,51 @@ export type PlayerToken =
   | "suya"
   | "bottle";
 
+// Host-configured, frozen once status leaves "lobby" (see games.settings /
+// GameState.settings). Every field here is actually wired into engine.ts —
+// see engine.test.ts's "settings" describe block for an ON/OFF pair per
+// setting.
+export interface GameSettings {
+  mapId: MapId;
+  maxPlayers: number; // 2-8
+  privateRoom: boolean; // true = not listed via GET /api/games/public
+  startingCashCents: number;
+  randomizePlayerOrder: boolean; // shuffled at START_GAME time (outside the pure engine, like card shuffling)
+  doubleRentOnFullSet: boolean;
+  freeParkingCash: boolean; // tax payments pool into GameState.freeParkingPot, paid out on landing
+  auctionOnDecline: boolean; // decline/can't-afford -> awaiting_auction instead of staying with the bank
+  collectRentWhileJailed: boolean; // false = no rent owed to a currently-jailed owner
+  mortgageEnabled: boolean;
+  evenBuild: boolean;
+  allowManualBankruptcy: boolean; // true = DECLARE_BANKRUPT works with no pending debt (voluntary quit)
+  bankruptcyTransfersAssets: boolean; // false = assets return to the bank unowned/unimproved, not to the creditor
+  tradingEnabled: boolean;
+  turnTimeLimitSeconds: number; // 0 = off
+}
+
+export const DEFAULT_SETTINGS: GameSettings = {
+  mapId: "naija",
+  maxPlayers: 4,
+  privateRoom: true,
+  startingCashCents: dollars(1500),
+  randomizePlayerOrder: true,
+  doubleRentOnFullSet: true,
+  freeParkingCash: false,
+  auctionOnDecline: false,
+  collectRentWhileJailed: true,
+  mortgageEnabled: true,
+  evenBuild: true,
+  allowManualBankruptcy: false,
+  bankruptcyTransfersAssets: true,
+  tradingEnabled: true,
+  turnTimeLimitSeconds: 0,
+};
+
 // The default is "awaiting_roll" (matches the games.turn_phase DB default).
 export type TurnPhase =
   | "awaiting_roll" // must ROLL (or PAY_JAIL_FINE/USE_JAIL_FREE if in jail)
   | "awaiting_purchase" // landed on an unowned space; BUY or DECLINE_BUY
+  | "awaiting_auction" // (auctionOnDecline) declined/can't afford; PLACE_BID or PASS_AUCTION
   | "awaiting_tax_choice" // landed on a choice tax space; CHOOSE_TAX flat|percent
   | "awaiting_payment" // owes rent/tax/a card's pay effect; see pendingDebt
   | "awaiting_card" // landed on a card space; waiting for a DRAW_CARD action
@@ -78,8 +120,22 @@ export interface TradeProposal {
   receive: TradeOffer; // what fromPlayerId wants from toPlayerId
 }
 
+// (settings.auctionOnDecline) A property nobody bought outright goes up
+// for auction among every non-bankrupt player instead of staying with the
+// bank. eligiblePlayerIds shrinks as players PASS_AUCTION; the last one
+// standing wins at highestBid. turnPlayerId is whichever eligible player
+// must act next.
+export interface PendingAuction {
+  spaceIndex: number;
+  highestBid: number;
+  highestBidderId: string | null;
+  eligiblePlayerIds: string[];
+  turnPlayerId: string;
+}
+
 export interface GameState {
-  mapId: MapId;
+  settings: GameSettings;
+  hostPlayerId: string | null;
   status: GameStatus;
   turnPhase: TurnPhase;
   currentPlayerIndex: number;
@@ -105,6 +161,18 @@ export interface GameState {
   pendingTaxChoice: { spaceIndex: number } | null;
 
   pendingDebt: PendingDebt | null;
+  pendingAuction: PendingAuction | null;
+
+  // (settings.freeParkingCash) accumulated tax payments, paid out to
+  // whoever next lands on Free Parking. Always 0 and unused when the
+  // setting is off.
+  freeParkingPot: number;
+
+  // (settings.turnTimeLimitSeconds) epoch ms of when the current turn
+  // began; set by the API layer (reduce() itself can't call Date.now() and
+  // stay pure) whenever currentPlayerIndex changes. Used to authorize a
+  // TIMEOUT_END_TURN action server-side, never trusting client-reported time.
+  turnStartedAt: number | null;
 
   trades: TradeProposal[];
   nextTradeId: number;

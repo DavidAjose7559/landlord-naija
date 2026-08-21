@@ -31,7 +31,7 @@ export function ActionBar({ game, session, dispatch }: ActionBarProps) {
   const [message, setMessage] = useState<string | null>(null);
   const [drawnCard, setDrawnCard] = useState<DrawnCard | null>(null);
 
-  const map = MAPS[game.state.mapId];
+  const map = MAPS[game.state.settings.mapId];
   const me = session ? game.state.players.find((p) => p.id === session.playerId) : undefined;
   const isMyTurn = me?.id === game.state.players[game.state.currentPlayerIndex]?.id;
 
@@ -192,7 +192,7 @@ function BuyPrompt({
   act: (action: ClientAction) => Promise<{ ok: boolean; reason?: string } | null>;
 }) {
   const player = game.state.players[game.state.currentPlayerIndex];
-  const space = MAPS[game.state.mapId].spaces[player.position];
+  const space = MAPS[game.state.settings.mapId].spaces[player.position];
   if (space.type !== "property" && space.type !== "transport" && space.type !== "utility") return null;
 
   return (
@@ -234,7 +234,7 @@ function TaxChoicePrompt({
 }) {
   const player = game.state.players[game.state.currentPlayerIndex];
   const spaceIndex = game.state.pendingTaxChoice?.spaceIndex;
-  const space = spaceIndex !== undefined ? MAPS[game.state.mapId].spaces[spaceIndex] : undefined;
+  const space = spaceIndex !== undefined ? MAPS[game.state.settings.mapId].spaces[spaceIndex] : undefined;
   if (!space || space.type !== "tax" || !space.choice) return null;
 
   const percentAmount = Math.round((netWorth(game.state, player.id) * space.choice.percentOfNetWorth) / 100);

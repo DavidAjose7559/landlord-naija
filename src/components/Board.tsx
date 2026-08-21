@@ -272,7 +272,7 @@ function cornerIcon(space: Space): string {
 }
 
 export function Board({ state, className }: BoardProps) {
-  const spaces = MAPS[state.mapId].spaces;
+  const spaces = MAPS[state.settings.mapId].spaces;
   const playersBySpace = new Map<number, PlayerState[]>();
   for (const player of state.players) {
     if (player.bankrupt) continue;

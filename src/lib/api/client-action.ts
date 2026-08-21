@@ -24,6 +24,8 @@ export const clientActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("ROLL") }).strict(),
   z.object({ type: z.literal("BUY") }).strict(),
   z.object({ type: z.literal("DECLINE_BUY") }).strict(),
+  z.object({ type: z.literal("PLACE_BID"), amount: z.number().int().positive() }).strict(),
+  z.object({ type: z.literal("PASS_AUCTION") }).strict(),
   z.object({ type: z.literal("PAY_RENT") }).strict(),
   z.object({ type: z.literal("DRAW_CARD") }).strict(),
   z.object({ type: z.literal("BUILD_HOUSE"), spaceIndex: spaceIndexSchema }).strict(),
@@ -34,6 +36,7 @@ export const clientActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("PAY_JAIL_FINE") }).strict(),
   z.object({ type: z.literal("USE_JAIL_FREE") }).strict(),
   z.object({ type: z.literal("END_TURN") }).strict(),
+  z.object({ type: z.literal("FORCE_END_TURN") }).strict(),
   z.object({ type: z.literal("DECLARE_BANKRUPT") }).strict(),
   z
     .object({

@@ -160,8 +160,8 @@ export function TradePanel({ game, session, dispatch }: TradePanelProps) {
             <h2 className="text-lg font-bold text-ink">
               {game.state.players.find((p) => p.id === incoming.fromPlayerId)?.name ?? "A player"} proposes a trade
             </h2>
-            <OfferSummary label="They give you" offer={incoming.give} spaces={MAPS[game.state.mapId].spaces} />
-            <OfferSummary label="They want" offer={incoming.receive} spaces={MAPS[game.state.mapId].spaces} />
+            <OfferSummary label="They give you" offer={incoming.give} spaces={MAPS[game.state.settings.mapId].spaces} />
+            <OfferSummary label="They want" offer={incoming.receive} spaces={MAPS[game.state.settings.mapId].spaces} />
             <div className="flex gap-2">
               <button
                 type="button"
@@ -201,7 +201,7 @@ function OfferEditor({
   onChange: (offer: OfferDraft) => void;
 }) {
   const tradableIndexes = tradableSpaceIndexes(game, ownerId);
-  const mapSpaces = MAPS[game.state.mapId].spaces;
+  const mapSpaces = MAPS[game.state.settings.mapId].spaces;
 
   function toggleSpace(idx: number) {
     const has = offer.spaceIndexes.includes(idx);

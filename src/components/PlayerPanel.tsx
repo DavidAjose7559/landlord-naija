@@ -29,7 +29,7 @@ interface OwnedSpaceInfo {
 }
 
 function ownedSpaces(game: PublicGame, playerId: string): OwnedSpaceInfo[] {
-  const spaces = MAPS[game.state.mapId].spaces;
+  const spaces = MAPS[game.state.settings.mapId].spaces;
   return Object.entries(game.state.ownership)
     .filter(([, own]) => own.ownerId === playerId)
     .map(([idxStr, own]) => {
