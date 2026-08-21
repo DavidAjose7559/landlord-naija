@@ -32,3 +32,17 @@ export const PLAYER_TOKEN_EMOJI: Record<PlayerToken, string> = {
   suya: "🍢",
   bottle: "🍾",
 };
+
+// Distinct per-token colour used for ownership dots on the board and
+// token accents — not the same palette as property colour groups, so the
+// two never get confused at a glance.
+export const PLAYER_TOKEN_COLOR: Record<PlayerToken, string> = {
+  danfo: "#FFC107",
+  keke: "#FF7043",
+  jollof: "#EF5350",
+  gele: "#AB47BC",
+  okada: "#42A5F5",
+  agbada: "#26A69A",
+  suya: "#A1887F",
+  bottle: "#26C6DA",
+};

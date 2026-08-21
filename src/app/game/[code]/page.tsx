@@ -2,16 +2,23 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect } from "react";
-import { Money } from "@/components/Money";
+import { useEffect, useState } from "react";
+import { ActionBar } from "@/components/ActionBar";
+import { Board } from "@/components/Board";
+import { DiceRoller } from "@/components/DiceRoller";
+import { EventLog } from "@/components/EventLog";
+import { PlayerPanel } from "@/components/PlayerPanel";
+import { TradePanel } from "@/components/TradePanel";
 import { useGame } from "@/hooks/useGame";
-import { PLAYER_TOKEN_EMOJI } from "@/lib/tokens";
 
 export default function BoardPage() {
   const { code } = useParams<{ code: string }>();
   const roomCode = code.toUpperCase();
   const router = useRouter();
-  const { game, loading, error, session, pending } = useGame(roomCode);
+  const { game, loading, error, session, pending, dispatch } = useGame(roomCode);
+
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [muted, setMuted] = useState(true);
 
   useEffect(() => {
     if (game && game.status === "lobby") {
@@ -19,40 +26,34 @@ export default function BoardPage() {
     }
   }, [game, roomCode, router]);
 
-  if (loading) {
-    return <CenteredMessage>Loading…</CenteredMessage>;
-  }
-  if (error && !game) {
-    return <CenteredMessage>{error}</CenteredMessage>;
-  }
+  if (loading) return <CenteredMessage>Loading…</CenteredMessage>;
+  if (error && !game) return <CenteredMessage>{error}</CenteredMessage>;
   if (!game || game.status === "lobby") return null;
 
-  const currentPlayer = game.state.players[game.state.currentPlayerIndex];
+  const isMyTurn = session ? game.state.players[game.state.currentPlayerIndex]?.id === session.playerId : false;
 
-  return (
-    <div className="mx-auto flex min-h-screen w-full max-w-2xl flex-col gap-10 bg-canvas px-6 py-16">
+  const panelContent = (
+    <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-0.5">
           <span className="text-xs font-medium tracking-widest text-muted uppercase">Room {roomCode}</span>
-          <h1 className="text-2xl font-bold text-ink">
-            {game.status === "finished" ? "Game over" : "The board"}
-          </h1>
+          <h1 className="text-lg font-bold text-ink">{game.status === "finished" ? "Game over" : "Landlord"}</h1>
         </div>
-        <Link href={`/game/${roomCode}/verify`} className="text-sm font-medium text-accent hover:brightness-110">
-          Fairness →
-        </Link>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setMuted((m) => !m)}
+            aria-pressed={!muted}
+            aria-label={muted ? "Unmute dice sound" : "Mute dice sound"}
+            className="rounded-full bg-surface-2 px-3 py-1.5 text-xs text-ink"
+          >
+            {muted ? "🔇" : "🔊"}
+          </button>
+          <Link href={`/game/${roomCode}/verify`} className="text-xs font-medium text-accent hover:brightness-110">
+            Fairness →
+          </Link>
+        </div>
       </div>
-
-      {game.status === "active" && currentPlayer && (
-        <div className="flex items-center gap-3 rounded-2xl bg-surface px-5 py-4">
-          <span className="text-2xl">{PLAYER_TOKEN_EMOJI[currentPlayer.token]}</span>
-          <span className="text-sm text-ink">
-            <span className="font-semibold">{currentPlayer.name}</span>
-            {currentPlayer.id === session?.playerId ? " (you)" : ""} — {phaseLabel(game.turnPhase)}
-          </span>
-          {pending && <span className="ml-auto animate-pulse text-xs text-muted">syncing…</span>}
-        </div>
-      )}
 
       {game.status === "finished" && (
         <div className="rounded-2xl bg-surface px-5 py-4 text-center">
@@ -64,45 +65,44 @@ export default function BoardPage() {
         </div>
       )}
 
-      <div className="flex flex-col gap-2">
-        {game.state.players.map((player) => (
-          <div
-            key={player.id}
-            className={`flex items-center gap-4 rounded-2xl px-5 py-3 ${
-              player.id === currentPlayer?.id && game.status === "active" ? "bg-surface-2" : "bg-surface"
-            } ${player.bankrupt ? "opacity-40" : ""}`}
-          >
-            <span className="text-2xl">{PLAYER_TOKEN_EMOJI[player.token]}</span>
-            <span className="flex-1 text-left font-medium text-ink">
-              {player.name}
-              {player.id === session?.playerId ? " (you)" : ""}
-              {player.bankrupt ? " — bankrupt" : ""}
-            </span>
-            <Money cents={player.cashCents} className="font-semibold text-ink" />
-          </div>
-        ))}
-      </div>
+      {game.status === "active" && (
+        <>
+          <DiceRoller game={game} isMyTurn={isMyTurn} dispatch={dispatch} muted={muted} />
+          <ActionBar game={game} session={session} dispatch={dispatch} />
+          {session && <TradePanel game={game} session={session} dispatch={dispatch} />}
+        </>
+      )}
 
-      <p className="text-center text-sm text-muted">The full board is coming next — this is live game state.</p>
+      <PlayerPanel game={game} session={session} dispatch={dispatch} />
+      <EventLog gameId={game.id} players={game.state.players} />
+
+      {pending && <p className="text-center text-xs text-muted">Syncing…</p>}
     </div>
   );
-}
 
-function phaseLabel(phase: string): string {
-  switch (phase) {
-    case "awaiting_roll":
-      return "waiting to roll";
-    case "awaiting_purchase":
-      return "deciding whether to buy";
-    case "awaiting_payment":
-      return "settling a payment";
-    case "awaiting_card":
-      return "drawing a card";
-    case "awaiting_end_turn":
-      return "wrapping up their turn";
-    default:
-      return phase;
-  }
+  return (
+    <div className="flex min-h-screen flex-col gap-8 bg-canvas px-4 py-8 pb-40 md:flex-row md:items-start md:justify-center md:gap-10 md:px-8 md:pb-8">
+      <Board state={game.state} className="md:sticky md:top-8" />
+
+      <div
+        className={`fixed inset-x-0 bottom-0 z-40 overflow-hidden rounded-t-3xl bg-surface transition-[max-height] duration-300 ease-out md:static md:z-auto md:max-h-none md:w-96 md:shrink-0 md:overflow-visible md:rounded-none md:bg-transparent md:transition-none ${
+          sheetOpen ? "max-h-[80vh]" : "max-h-32"
+        }`}
+      >
+        <button
+          type="button"
+          onClick={() => setSheetOpen((v) => !v)}
+          aria-expanded={sheetOpen}
+          className="flex w-full justify-center py-2 md:hidden"
+        >
+          <span className="h-1 w-10 rounded-full bg-white/20" />
+        </button>
+        <div className="max-h-[calc(80vh-2rem)] overflow-y-auto px-4 pb-8 md:max-h-none md:overflow-visible md:px-0 md:pb-0">
+          {panelContent}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function CenteredMessage({ children }: { children: React.ReactNode }) {
