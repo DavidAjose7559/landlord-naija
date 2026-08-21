@@ -45,6 +45,25 @@ export async function loadTrade(gameId: string, tradeId: string): Promise<TradeR
   };
 }
 
+// (Section 3) A bankrupt player must be "immediately removed from all
+// pending flows" — trades live outside the pure engine (see engine.ts's
+// GameAction comment on EXECUTE_ACCEPTED_TRADE), so this is the API
+// layer's job, not reduce()'s. Called whenever a PLAYER_BANKRUPT event
+// comes back from an action. Two separate queries rather than a single
+// `.or(...)` filter string, since playerId ends up interpolated either
+// way and this keeps it as a plain parameterized `.eq()` on each side.
+export async function cancelOpenTradesInvolvingPlayer(gameId: string, playerId: string): Promise<void> {
+  const [asProposer, asRecipient] = await Promise.all([
+    supabaseAdmin.from("trades").select("id").eq("game_id", gameId).eq("status", "open").eq("from_player_id", playerId),
+    supabaseAdmin.from("trades").select("id").eq("game_id", gameId).eq("status", "open").eq("to_player_id", playerId),
+  ]);
+  if (asProposer.error || asRecipient.error) {
+    throw new ApiError(500, "failed to load open trades for bankruptcy cleanup");
+  }
+  const ids = new Set([...(asProposer.data ?? []), ...(asRecipient.data ?? [])].map((row) => row.id as string));
+  await Promise.all([...ids].map((id) => callRpc("respond_trade", { p_trade_id: id, p_status: "cancelled" })));
+}
+
 export interface GameRow {
   id: string;
   roomCode: string;

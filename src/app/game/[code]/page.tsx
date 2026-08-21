@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ActionBar } from "@/components/ActionBar";
+import { AuctionModal } from "@/components/AuctionModal";
 import { Board } from "@/components/Board";
 import { DiceRoller } from "@/components/DiceRoller";
 import { LogChatTabs } from "@/components/LogChatTabs";
@@ -14,6 +15,7 @@ import { WinnerScreen } from "@/components/WinnerScreen";
 import { PropertyInspector } from "@/components/PropertyInspector";
 import { MAPS } from "@/game/maps";
 import { useGame } from "@/hooks/useGame";
+import { useTurnWatchdog } from "@/hooks/useTurnWatchdog";
 
 export default function BoardPage() {
   const { code } = useParams<{ code: string }>();
@@ -29,6 +31,8 @@ export default function BoardPage() {
       router.replace(`/game/${roomCode}/lobby`);
     }
   }, [game, roomCode, router]);
+
+  useTurnWatchdog(game, dispatch);
 
   if (loading) return <CenteredMessage>Loading…</CenteredMessage>;
   if (error && !game) return <CenteredMessage>{error}</CenteredMessage>;
@@ -117,6 +121,8 @@ export default function BoardPage() {
       <MobileSheet>{panelContent}</MobileSheet>
 
       {game.status === "finished" && game.state.winnerPlayerId && <WinnerScreen game={game} roomCode={roomCode} />}
+
+      <AuctionModal game={game} session={session} dispatch={dispatch} />
 
       {inspectedIndex !== null && (
         <PropertyInspector

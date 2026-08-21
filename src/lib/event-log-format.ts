@@ -358,8 +358,12 @@ export function buildLines(
         push(event.seq, `${playerName(players, p.playerId)} bid ${formatCAD(Number(p.amount))}.`, { topLevel: true });
         break;
 
-      case "AUCTION_PASSED":
-        push(event.seq, `${playerName(players, p.playerId)} passed on the auction.`, { topLevel: true });
+      case "AUCTION_BIDDER_DISQUALIFIED":
+        push(
+          event.seq,
+          `${playerName(players, p.playerId)} went bankrupt mid-auction — their bid on ${spaceName(p.spaceIndex)} no longer counts.`,
+          { topLevel: true },
+        );
         break;
 
       case "AUCTION_WON":

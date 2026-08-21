@@ -51,6 +51,7 @@ function makeState(players: PlayerState[], overrides: Partial<GameState> = {}): 
     pendingAuction: null,
     freeParkingPot: 0,
     turnStartedAt: null,
+    auctionDeadline: null,
     ...overrides,
   };
 }
@@ -99,8 +100,8 @@ describe("event log vocabulary — WHO, WHAT, HOW MUCH", () => {
     const bid = run(declined.next, { type: "PLACE_BID", playerId: "y", amount: 8_500 });
     expect(bid.texts).toEqual(["Yinka bid $85."]);
 
-    const passed = run(bid.next, { type: "PASS_AUCTION", playerId: "d" });
-    expect(passed.texts).toEqual(["Davido passed on the auction.", "Yinka won the auction for Ogba at $85."]);
+    const resolved = run(bid.next, { type: "RESOLVE_AUCTION_TIMEOUT" });
+    expect(resolved.texts).toEqual(["Yinka won the auction for Ogba at $85."]);
   });
 
   it("a doubles roll calls out the reroll", () => {

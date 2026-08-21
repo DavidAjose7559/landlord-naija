@@ -123,17 +123,19 @@ export interface TradeOffer {
   jailFreeCards: number;
 }
 
-// (settings.auctionOnDecline) A property nobody bought outright goes up
-// for auction among every non-bankrupt player instead of staying with the
-// bank. eligiblePlayerIds shrinks as players PASS_AUCTION; the last one
-// standing wins at highestBid. turnPlayerId is whichever eligible player
-// must act next.
+// (settings.auctionOnDecline, or a manual "put up for auction") A property
+// nobody bought outright goes up for auction among every solvent player
+// simultaneously (Section 3 — no more turn-by-turn bidding). `bids` is a
+// full, append-only history (most recent last) rather than just the
+// current high bid — that's what lets a bankrupt bidder's offer be
+// dropped cleanly: the effective high bid is always recomputed from
+// `bids` filtered to `eligiblePlayerIds` (see auctionHighBid in engine.ts),
+// so disqualifying a bidder automatically reverts to whoever's next,
+// without deleting anything from the ledger.
 export interface PendingAuction {
   spaceIndex: number;
-  highestBid: number;
-  highestBidderId: string | null;
-  eligiblePlayerIds: string[];
-  turnPlayerId: string;
+  eligiblePlayerIds: string[]; // solvent players still allowed to bid; shrinks only on bankruptcy/leaving, never on a plain non-bid
+  bids: { playerId: string; amount: number }[];
 }
 
 export interface GameState {
@@ -171,4 +173,11 @@ export interface GameState {
   // stay pure) whenever currentPlayerIndex changes. Used to authorize a
   // TIMEOUT_END_TURN action server-side, never trusting client-reported time.
   turnStartedAt: number | null;
+
+  // epoch ms deadline for the current auction, same ownership rules as
+  // turnStartedAt: set by the API layer to now + AUCTION_DURATION_MS
+  // whenever a new auction starts or a new high bid lands (BID_PLACED
+  // resets the clock), cleared when the auction ends. Authorizes
+  // RESOLVE_AUCTION_TIMEOUT server-side once it's actually passed.
+  auctionDeadline: number | null;
 }

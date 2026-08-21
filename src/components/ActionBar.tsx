@@ -98,19 +98,6 @@ export function ActionBar({ game, session, dispatch }: ActionBarProps) {
         <p className="text-center text-sm text-muted">Waiting for {debtor.name} to settle a debt.</p>
       )}
 
-      {!me.bankrupt && game.turnPhase === "awaiting_auction" && game.state.pendingAuction && (
-        <>
-          {game.state.pendingAuction.turnPlayerId === me.id ? (
-            <AuctionPrompt game={game} me={me} busy={busy} act={act} />
-          ) : (
-            <p className="text-center text-sm text-muted">
-              Waiting for {game.state.players.find((p) => p.id === game.state.pendingAuction?.turnPlayerId)?.name} to
-              bid or pass…
-            </p>
-          )}
-        </>
-      )}
-
       {me.bankrupt || game.turnPhase === "awaiting_auction" ? null : !isMyTurn ? (
         game.turnPhase !== "awaiting_payment" && <p className="text-center text-sm text-muted">Waiting for your turn…</p>
       ) : (
@@ -215,6 +202,15 @@ function BuyPrompt({
           className="flex-1 rounded-full bg-surface-2 px-4 py-2.5 text-sm font-semibold text-ink disabled:opacity-40"
         >
           Decline
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => act({ type: "START_AUCTION" })}
+          className="flex-1 rounded-full bg-surface-2 px-4 py-2.5 text-sm font-semibold text-ink disabled:opacity-40"
+          title="Send this property to auction instead of buying or declining"
+        >
+          Auction it
         </button>
       </div>
     </div>
@@ -352,71 +348,6 @@ function DebtPanel({
   );
 }
 
-function AuctionPrompt({
-  game,
-  me,
-  busy,
-  act,
-}: {
-  game: PublicGame;
-  me: PlayerState;
-  busy: boolean;
-  act: (action: ClientAction) => Promise<{ ok: boolean; reason?: string } | null>;
-}) {
-  const auction = game.state.pendingAuction;
-  const [bidInput, setBidInput] = useState("");
-  if (!auction) return null;
-
-  const space = MAPS[game.state.settings.mapId].spaces[auction.spaceIndex];
-  const minBid = auction.highestBid + 100;
-
-  return (
-    <div className="flex flex-col gap-3 rounded-2xl bg-surface px-4 py-4">
-      <p className="text-sm text-ink">
-        Auctioning <span className="font-semibold">{space.name}</span>.{" "}
-        {auction.highestBidderId ? (
-          <>
-            Current bid {formatCAD(auction.highestBid)} by{" "}
-            {game.state.players.find((p) => p.id === auction.highestBidderId)?.name}.
-          </>
-        ) : (
-          "No bids yet."
-        )}
-      </p>
-      <div className="flex gap-2">
-        <input
-          type="number"
-          min={minBid / 100}
-          step={1}
-          value={bidInput}
-          onChange={(e) => setBidInput(e.target.value)}
-          placeholder={formatCAD(minBid)}
-          className="w-28 rounded-full bg-surface-2 px-4 py-2 text-sm text-ink"
-        />
-        <button
-          type="button"
-          disabled={busy || !bidInput || Math.round(Number(bidInput) * 100) < minBid || Math.round(Number(bidInput) * 100) > me.cashCents}
-          onClick={async () => {
-            const amount = Math.round(Number(bidInput) * 100);
-            const result = await act({ type: "PLACE_BID", amount });
-            if (result?.ok) setBidInput("");
-          }}
-          className="flex-1 rounded-full bg-accent px-4 py-2.5 text-sm font-semibold text-accent-foreground disabled:opacity-40"
-        >
-          Bid
-        </button>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => act({ type: "PASS_AUCTION" })}
-          className="rounded-full bg-surface-2 px-4 py-2.5 text-sm font-semibold text-ink disabled:opacity-40"
-        >
-          Pass
-        </button>
-      </div>
-    </div>
-  );
-}
 
 // Always visible whenever the room allows it, regardless of turn — a
 // player can walk away at any time. Two-step confirm ("type QUIT") since

@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { GENESIS_HASH, hashChain, rollFor } from "@/game/dice";
-import { reduce, type GameAction, type GameEvent } from "@/game/engine";
+import { AUCTION_DURATION_MS, reduce, type GameAction, type GameEvent } from "@/game/engine";
 import { actionRequestSchema, type ClientAction } from "@/lib/api/client-action";
 import {
   callRpc,
+  cancelOpenTradesInvolvingPlayer,
   drawNextCardId,
   gameRowToPublicJson,
   loadDeckState,
@@ -21,16 +22,21 @@ import { parseJsonBody, parseRoomCode } from "@/lib/api/validate";
 import { supabaseAdmin } from "@/lib/supabase/server";
 
 // DECLARE_BANKRUPT is exempt — a player can bail out even when it isn't
-// their turn. Auction bids/passes are gated by pendingAuction.turnPlayerId
-// instead of currentPlayerIndex (engine.ts enforces that itself);
-// FORCE_END_TURN can be triggered by any player once the clock has
-// actually run out, not just the stuck player. Trade proposing/countering/
-// accepting/declining doesn't go through this route at all anymore — see
-// src/app/api/games/[code]/trades/**.
-const TURN_EXEMPT_ACTIONS = new Set(["DECLARE_BANKRUPT", "PLACE_BID", "PASS_AUCTION", "FORCE_END_TURN"]);
+// their turn. PLACE_BID is exempt because an auction (Section 3) is
+// simultaneous, not turn-by-turn — engine.ts gates it by
+// pendingAuction.eligiblePlayerIds instead of currentPlayerIndex.
+// RESOLVE_AUCTION_TIMEOUT and FORCE_END_TURN can be triggered by any
+// player once the clock has actually run out server-side, not just the
+// stuck one. Trade proposing/countering/accepting/declining doesn't go
+// through this route at all anymore — see src/app/api/games/[code]/trades/**.
+const TURN_EXEMPT_ACTIONS = new Set(["DECLARE_BANKRUPT", "PLACE_BID", "RESOLVE_AUCTION_TIMEOUT", "FORCE_END_TURN"]);
 
 const RATE_LIMIT = 20;
 const RATE_WINDOW_MS = 10_000;
+
+// (Section 3 turn watchdog) "3 minutes if none set" — the hard backstop
+// against a stuck turn when the host never configured turnTimeLimitSeconds.
+const WATCHDOG_FALLBACK_SECONDS = 180;
 
 interface ResolvedAction {
   action: GameAction;
@@ -109,8 +115,16 @@ async function resolveConcreteAction(
       };
 
     case "FORCE_END_TURN": {
-      const limitSeconds = game.state.settings.turnTimeLimitSeconds;
-      if (limitSeconds <= 0) throw new ApiError(409, "no turn time limit is set");
+      // (Section 3 turn watchdog) settings.turnTimeLimitSeconds is a
+      // player-facing, host-configured convenience (skip a slow roller);
+      // WATCHDOG_FALLBACK_SECONDS is the hard "the game must never
+      // deadlock" backstop that applies even when the host left the limit
+      // off — the host's setting only ever shortens the wait, never
+      // removes the guarantee.
+      const limitSeconds =
+        game.state.settings.turnTimeLimitSeconds > 0
+          ? game.state.settings.turnTimeLimitSeconds
+          : WATCHDOG_FALLBACK_SECONDS;
       const startedAt = game.state.turnStartedAt;
       if (!startedAt || Date.now() - startedAt < limitSeconds * 1000) {
         throw new ApiError(409, "the current turn hasn't timed out yet");
@@ -124,9 +138,18 @@ async function resolveConcreteAction(
       };
     }
 
+    case "RESOLVE_AUCTION_TIMEOUT": {
+      if (!game.state.pendingAuction) throw new ApiError(409, "no auction is open");
+      const deadline = game.state.auctionDeadline;
+      if (!deadline || Date.now() < deadline) {
+        throw new ApiError(409, "the auction hasn't timed out yet");
+      }
+      return { action: { type: "RESOLVE_AUCTION_TIMEOUT" }, rollPayload: null, deckStatePayload: null };
+    }
+
     case "BUY":
     case "DECLINE_BUY":
-    case "PASS_AUCTION":
+    case "START_AUCTION":
     case "PAY_RENT":
     case "RAISE_DEBT_HELP":
     case "PAY_JAIL_FINE":
@@ -178,10 +201,21 @@ export async function POST(request: Request, context: { params: Promise<{ code: 
     // (settings.turnTimeLimitSeconds) reduce() can't call Date.now() and
     // stay pure, so the turn clock is stamped here whenever the active
     // player actually changes.
-    const newState =
+    let newState =
       reducedState.currentPlayerIndex !== game.state.currentPlayerIndex
         ? { ...reducedState, turnStartedAt: Date.now() }
         : reducedState;
+
+    // (Section 3) Same reasoning for the auction clock: a fresh auction or
+    // a new high bid resets it to now + AUCTION_DURATION_MS; the auction
+    // ending clears it. Checked by event type, not by diffing pendingAuction,
+    // so it can't be fooled by a bid that happens to leave the object shape
+    // superficially similar.
+    if (events.some((e) => e.type === "AUCTION_STARTED" || e.type === "BID_PLACED")) {
+      newState = { ...newState, auctionDeadline: Date.now() + AUCTION_DURATION_MS };
+    } else if (events.some((e) => e.type === "AUCTION_WON" || e.type === "AUCTION_ENDED_NO_WINNER")) {
+      newState = { ...newState, auctionDeadline: null };
+    }
 
     if (events.length === 0) {
       // Well-formed request, but the engine rejected it (illegal move,
@@ -204,6 +238,16 @@ export async function POST(request: Request, context: { params: Promise<{ code: 
       p_roll: rollPayload,
       p_deck_state: deckStatePayload,
     });
+
+    // (Section 3) "Immediately removed from all pending flows" — auctions
+    // and debt resolution are handled inside reduce() itself (see
+    // resolveBankruptcy in engine.ts); trades live outside the pure engine
+    // entirely, so this is the one place left to close that gap.
+    for (const event of events) {
+      if (event.type === "PLAYER_BANKRUPT") {
+        await cancelOpenTradesInvolvingPlayer(game.id, event.playerId);
+      }
+    }
 
     const updated = await loadGameByRoomCode(roomCode);
     return NextResponse.json({ ok: true, ...gameRowToPublicJson(updated) });

@@ -54,6 +54,7 @@ function makeState(players: PlayerState[], overrides: Partial<GameState> = {}): 
     pendingAuction: null,
     freeParkingPot: 0,
     turnStartedAt: null,
+    auctionDeadline: null,
     ...overrides,
   };
 }
@@ -721,23 +722,135 @@ describe("settings", () => {
     expect(off.pendingAuction).toBeNull();
   });
 
-  it("auction: the highest bidder wins the property and pays their bid", () => {
+  it("auction: any eligible player can bid any time (no turn order); the deadline resolution awards the high bidder", () => {
     const state = makeState(
-      [makePlayer("p1", 0, { position: 1, cashCents: 100_000 }), makePlayer("p2", 1, { cashCents: 100_000 })],
+      [
+        makePlayer("p1", 0, { position: 1, cashCents: 100_000 }),
+        makePlayer("p2", 1, { cashCents: 100_000 }),
+        makePlayer("p3", 2, { cashCents: 100_000 }),
+      ],
       { settings: { ...DEFAULT_SETTINGS, auctionOnDecline: true }, turnPhase: "awaiting_purchase" },
     );
     const { state: afterDecline } = reduce(state, { type: "DECLINE_BUY", playerId: "p1" });
-    expect(afterDecline.pendingAuction?.turnPlayerId).toBe("p2");
+    expect(afterDecline.pendingAuction?.eligiblePlayerIds).toEqual(["p1", "p2", "p3"]);
 
-    const { state: afterBid } = reduce(afterDecline, { type: "PLACE_BID", playerId: "p2", amount: 1_000 });
-    expect(afterBid.pendingAuction?.highestBidderId).toBe("p2");
-    expect(afterBid.pendingAuction?.turnPlayerId).toBe("p1");
+    // p3 bids first, then p1 (the decliner) outbids them — no turn gate.
+    const { state: afterP3 } = reduce(afterDecline, { type: "PLACE_BID", playerId: "p3", amount: 500 });
+    const { state: afterP1 } = reduce(afterP3, { type: "PLACE_BID", playerId: "p1", amount: 1_000 });
+    expect(afterP1.pendingAuction?.bids).toEqual([
+      { playerId: "p3", amount: 500 },
+      { playerId: "p1", amount: 1_000 },
+    ]);
 
-    const { state: afterPass, events } = reduce(afterBid, { type: "PASS_AUCTION", playerId: "p1" });
-    expect(afterPass.pendingAuction).toBeNull();
-    expect(afterPass.ownership[1]).toEqual({ ownerId: "p2", houses: 0, hotel: false, mortgaged: false });
-    expect(afterPass.players[1].cashCents).toBe(100_000 - 1_000);
-    expect(events.some((e) => e.type === "AUCTION_WON")).toBe(true);
+    const { state: resolved, events } = reduce(afterP1, { type: "RESOLVE_AUCTION_TIMEOUT" });
+    expect(resolved.pendingAuction).toBeNull();
+    expect(resolved.ownership[1]).toEqual({ ownerId: "p1", houses: 0, hotel: false, mortgaged: false });
+    expect(resolved.players[0].cashCents).toBe(100_000 - 1_000);
+    expect(events.some((e) => e.type === "AUCTION_WON" && e.playerId === "p1" && e.amount === 1_000)).toBe(true);
+  });
+
+  it("auction: a stale/low bid is rejected, and bidding above your own cash is rejected", () => {
+    const state = makeState(
+      [makePlayer("p1", 0, { position: 1, cashCents: 100_000 }), makePlayer("p2", 1, { cashCents: 300 })],
+      { settings: { ...DEFAULT_SETTINGS, auctionOnDecline: true }, turnPhase: "awaiting_purchase" },
+    );
+    const { state: afterDecline } = reduce(state, { type: "DECLINE_BUY", playerId: "p1" });
+    const { state: afterBid } = reduce(afterDecline, { type: "PLACE_BID", playerId: "p1", amount: 500 });
+
+    const stale = reduce(afterBid, { type: "PLACE_BID", playerId: "p2", amount: 500 }); // not strictly higher
+    expect(stale.events).toHaveLength(0);
+    expect(stale.state.pendingAuction?.bids).toHaveLength(1);
+
+    const tooRich = reduce(afterBid, { type: "PLACE_BID", playerId: "p2", amount: 1_000 }); // exceeds p2's cash
+    expect(tooRich.events).toHaveLength(0);
+  });
+
+  it("auction: a manual 'put up for auction' works even with auctionOnDecline OFF", () => {
+    const state = makeState([makePlayer("p1", 0, { position: 1 }), makePlayer("p2", 1)], {
+      settings: { ...DEFAULT_SETTINGS, auctionOnDecline: false },
+      turnPhase: "awaiting_purchase",
+    });
+    const { state: next, events } = reduce(state, { type: "START_AUCTION", playerId: "p1" });
+    expect(next.turnPhase).toBe("awaiting_auction");
+    expect(next.pendingAuction?.spaceIndex).toBe(1);
+    expect(events.some((e) => e.type === "AUCTION_STARTED" && e.manual === true)).toBe(true);
+  });
+
+  it("auction: no bids at all leaves the property with the bank", () => {
+    const state = makeState([makePlayer("p1", 0, { position: 1 }), makePlayer("p2", 1)], {
+      settings: { ...DEFAULT_SETTINGS, auctionOnDecline: true },
+      turnPhase: "awaiting_purchase",
+    });
+    const { state: afterDecline } = reduce(state, { type: "DECLINE_BUY", playerId: "p1" });
+    const { state: resolved, events } = reduce(afterDecline, { type: "RESOLVE_AUCTION_TIMEOUT" });
+    expect(resolved.pendingAuction).toBeNull();
+    expect(resolved.ownership[1]).toBeUndefined();
+    expect(events.some((e) => e.type === "AUCTION_ENDED_NO_WINNER")).toBe(true);
+  });
+
+  it("CRITICAL: a player going bankrupt mid-auction never hangs the game — the auction reverts or ends", () => {
+    // p2 is the high bidder, then goes bankrupt (voluntary quit) mid-auction;
+    // the auction must revert to p3's lower bid, not freeze.
+    const p1 = makePlayer("p1", 0, { position: 1, cashCents: 100_000 });
+    const p2 = makePlayer("p2", 1, { cashCents: 100_000 });
+    const p3 = makePlayer("p3", 2, { cashCents: 100_000 });
+    const state = makeState([p1, p2, p3], {
+      settings: { ...DEFAULT_SETTINGS, auctionOnDecline: true, allowManualBankruptcy: true },
+      turnPhase: "awaiting_purchase",
+    });
+    const { state: afterDecline } = reduce(state, { type: "DECLINE_BUY", playerId: "p1" });
+    const { state: afterP3 } = reduce(afterDecline, { type: "PLACE_BID", playerId: "p3", amount: 500 });
+    const { state: afterP2 } = reduce(afterP3, { type: "PLACE_BID", playerId: "p2", amount: 1_000 });
+    expect(afterP2.pendingAuction?.eligiblePlayerIds).toContain("p2");
+
+    const { state: afterBankrupt, events } = reduce(afterP2, { type: "DECLARE_BANKRUPT", playerId: "p2" });
+    expect(afterBankrupt.pendingAuction).not.toBeNull(); // still open — p3's bid can still win it
+    expect(afterBankrupt.pendingAuction?.eligiblePlayerIds).toEqual(["p1", "p3"]);
+    expect(events.some((e) => e.type === "AUCTION_BIDDER_DISQUALIFIED" && e.playerId === "p2")).toBe(true);
+
+    const { state: resolved, events: resolveEvents } = reduce(afterBankrupt, { type: "RESOLVE_AUCTION_TIMEOUT" });
+    expect(resolved.pendingAuction).toBeNull(); // never stuck
+    expect(resolved.ownership[1]).toEqual({ ownerId: "p3", houses: 0, hotel: false, mortgaged: false });
+    expect(resolveEvents.some((e) => e.type === "AUCTION_WON" && e.playerId === "p3" && e.amount === 500)).toBe(true);
+  });
+
+  it("CRITICAL: the auction ends outright once every eligible bidder has gone bankrupt", () => {
+    // 3 players so the auction can be fully exhausted (all 3 bankrupt)
+    // without the game itself ending early on a 2-player table.
+    const p1 = makePlayer("p1", 0, { position: 1 });
+    const p2 = makePlayer("p2", 1);
+    const p3 = makePlayer("p3", 2);
+    const state = makeState([p1, p2, p3], {
+      settings: { ...DEFAULT_SETTINGS, auctionOnDecline: true, allowManualBankruptcy: true },
+      turnPhase: "awaiting_purchase",
+    });
+    const { state: afterDecline } = reduce(state, { type: "DECLINE_BUY", playerId: "p1" });
+    const { state: afterP1Bankrupt } = reduce(afterDecline, { type: "DECLARE_BANKRUPT", playerId: "p1" });
+    expect(afterP1Bankrupt.pendingAuction).not.toBeNull();
+    const { state: afterP2Bankrupt } = reduce(afterP1Bankrupt, { type: "DECLARE_BANKRUPT", playerId: "p2" });
+    expect(afterP2Bankrupt.pendingAuction).not.toBeNull();
+    const { state: afterP3Bankrupt, events } = reduce(afterP2Bankrupt, { type: "DECLARE_BANKRUPT", playerId: "p3" });
+    // All three bankrupt -> the auction can never receive another bid, so
+    // it must resolve itself rather than sit open forever.
+    expect(afterP3Bankrupt.pendingAuction).toBeNull();
+    expect(events.some((e) => e.type === "AUCTION_ENDED_NO_WINNER")).toBe(true);
+  });
+
+  it("a bankrupt player who wasn't part of any auction doesn't wipe out an unrelated player's pending debt", () => {
+    // Real bug: resolveBankruptcy used to null out state.pendingDebt
+    // unconditionally, even when the debt belonged to someone else
+    // entirely — soft-locking the actual debtor in awaiting_payment.
+    const debtor = makePlayer("p1", 0, { cashCents: 0 });
+    const creditor = makePlayer("p2", 1, { cashCents: 0 });
+    const bystander = makePlayer("p3", 2);
+    const state = makeState([debtor, creditor, bystander], {
+      settings: { ...DEFAULT_SETTINGS, allowManualBankruptcy: true },
+      turnPhase: "awaiting_payment",
+      pendingDebt: { amount: 5_000, creditorId: "p2", reason: "rent" },
+    });
+    const { state: next } = reduce(state, { type: "DECLARE_BANKRUPT", playerId: "p3" });
+    expect(next.pendingDebt).toEqual({ amount: 5_000, creditorId: "p2", reason: "rent" });
+    expect(next.turnPhase).toBe("awaiting_payment");
   });
 
   it("collectRentWhileJailed: rent is skipped when the owner is jailed and the setting is OFF", () => {
@@ -1347,5 +1460,54 @@ describe("Section 1 event-vocabulary regressions", () => {
       receive,
     });
     expect(events.some((e) => e.type === "TRADE_ACCEPTED" && e.give === give && e.receive === receive)).toBe(true);
+  });
+});
+
+describe("FORCE_END_TURN — Section 3 turn watchdog (the game must never deadlock)", () => {
+  it("awaiting_roll / awaiting_end_turn: skips the stuck player's turn, as before", () => {
+    const state = makeState([makePlayer("p1", 0), makePlayer("p2", 1)], { turnPhase: "awaiting_roll" });
+    const { state: next, events } = reduce(state, { type: "FORCE_END_TURN", playerId: "p1" });
+    expect(next.currentPlayerIndex).toBe(1);
+    expect(events.some((e) => e.type === "TURN_TIMED_OUT" && e.playerId === "p1")).toBe(true);
+  });
+
+  it("awaiting_purchase: auto-declines the stuck purchase decision (respecting auctionOnDecline)", () => {
+    const state = makeState([makePlayer("p1", 0, { position: 1 }), makePlayer("p2", 1)], {
+      turnPhase: "awaiting_purchase",
+      settings: { ...DEFAULT_SETTINGS, auctionOnDecline: true },
+    });
+    const { state: next, events } = reduce(state, { type: "FORCE_END_TURN", playerId: "p1" });
+    expect(next.turnPhase).toBe("awaiting_auction"); // declined straight into the auction
+    expect(next.ownership[1]).toBeUndefined();
+    expect(events.some((e) => e.type === "TURN_TIMED_OUT")).toBe(true);
+    expect(events.some((e) => e.type === "PROPERTY_DECLINED")).toBe(true);
+  });
+
+  it("awaiting_payment: forces the stuck debtor bankrupt rather than freezing the game forever", () => {
+    const debtor = makePlayer("p1", 0, { cashCents: 0 });
+    const creditor = makePlayer("p2", 1);
+    const state = makeState([debtor, creditor], {
+      turnPhase: "awaiting_payment",
+      pendingDebt: { amount: 5_000, creditorId: "p2", reason: "rent" },
+    });
+    const { state: next, events } = reduce(state, { type: "FORCE_END_TURN", playerId: "p1" });
+    expect(next.players[0].bankrupt).toBe(true);
+    expect(next.pendingDebt).toBeNull();
+    expect(events.some((e) => e.type === "TURN_TIMED_OUT")).toBe(true);
+    expect(events.some((e) => e.type === "PLAYER_BANKRUPT" && e.playerId === "p1")).toBe(true);
+  });
+
+  it("awaiting_card / awaiting_auction: deliberately left alone (no safe forced move)", () => {
+    const cardState = makeState([makePlayer("p1", 0), makePlayer("p2", 1)], {
+      turnPhase: "awaiting_card",
+      pendingCardDeck: "treasure",
+    });
+    expect(reduce(cardState, { type: "FORCE_END_TURN", playerId: "p1" }).events).toHaveLength(0);
+
+    const auctionState = makeState([makePlayer("p1", 0), makePlayer("p2", 1)], {
+      turnPhase: "awaiting_auction",
+      pendingAuction: { spaceIndex: 1, eligiblePlayerIds: ["p1", "p2"], bids: [] },
+    });
+    expect(reduce(auctionState, { type: "FORCE_END_TURN", playerId: "p1" }).events).toHaveLength(0);
   });
 });

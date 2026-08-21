@@ -23,6 +23,7 @@ import { MAPS } from "./maps";
 import type {
   GameSettings,
   GameState,
+  PendingAuction,
   PendingDebt,
   PlayerState,
   PropertyOwnership,
@@ -33,6 +34,11 @@ import type {
 export const JAIL_FINE = dollars(50);
 export const MAX_JAIL_TURNS = 3;
 export const MAX_DOUBLES = 3;
+// (Section 3) Countdown duration, and how far a new high bid resets it —
+// shared between the API layer (which owns GameState.auctionDeadline,
+// same as turnStartedAt) and the client (which renders the countdown from
+// it), so the two can never disagree about how long an auction runs.
+export const AUCTION_DURATION_MS = 10_000;
 const MAX_HOUSES_IN_BANK = 32;
 const MAX_HOTELS_IN_BANK = 12;
 const BOARD_SIZE = 40;
@@ -55,8 +61,16 @@ export type GameAction =
   | { type: "ROLL"; playerId: string; d1: number; d2: number }
   | { type: "BUY"; playerId: string }
   | { type: "DECLINE_BUY"; playerId: string }
+  // Manual "Put up for auction" — beside Buy/Decline, works regardless of
+  // settings.auctionOnDecline (that setting only controls the automatic
+  // trigger on a plain decline).
+  | { type: "START_AUCTION"; playerId: string }
   | { type: "PLACE_BID"; playerId: string; amount: number }
-  | { type: "PASS_AUCTION"; playerId: string }
+  // No explicit "pass" — the auction is simultaneous and timer-driven now
+  // (Section 3), not turn-by-turn; not bidding before the deadline IS
+  // passing. Resolved server-side once the deadline the API layer set has
+  // actually elapsed (mirrors FORCE_END_TURN's turnStartedAt check).
+  | { type: "RESOLVE_AUCTION_TIMEOUT" }
   | { type: "PAY_RENT"; playerId: string }
   | { type: "RAISE_DEBT_HELP"; playerId: string }
   | { type: "DRAW_CARD"; playerId: string; cardId: string }
@@ -94,9 +108,9 @@ export type GameEvent =
   | { type: "MOVED"; playerId: string; from: number; to: number }
   | { type: "PROPERTY_PURCHASED"; playerId: string; spaceIndex: number; price: number }
   | { type: "PROPERTY_DECLINED"; playerId: string; spaceIndex: number }
-  | { type: "AUCTION_STARTED"; spaceIndex: number }
+  | { type: "AUCTION_STARTED"; spaceIndex: number; manual: boolean }
   | { type: "BID_PLACED"; playerId: string; amount: number }
-  | { type: "AUCTION_PASSED"; playerId: string }
+  | { type: "AUCTION_BIDDER_DISQUALIFIED"; playerId: string; spaceIndex: number }
   | { type: "AUCTION_WON"; playerId: string; spaceIndex: number; amount: number }
   | { type: "AUCTION_ENDED_NO_WINNER"; spaceIndex: number }
   | { type: "RENT_PAID"; payerId: string; payeeId: string; spaceIndex: number; amount: number }
@@ -146,6 +160,7 @@ export function createInitialGameState(settings: GameSettings): GameState {
     pendingAuction: null,
     freeParkingPot: 0,
     turnStartedAt: null,
+    auctionDeadline: null,
   };
 }
 
@@ -837,8 +852,36 @@ function resolveBankruptcy(
     events.push({ type: "PROPERTIES_RETURNED_TO_MARKET", playerId: player.id });
   }
 
-  if (state.pendingDebt) {
+  // Only clear pendingDebt if it actually belonged to THIS player (they
+  // were the current player mid-payment). Real bug this fixes: another
+  // player voluntarily going bankrupt (settings.allowManualBankruptcy) used
+  // to unconditionally null out whatever debt the ACTUAL current player was
+  // resolving — leaving them stuck in awaiting_payment with no pendingDebt
+  // object to act on, and no way out (DECLARE_BANKRUPT requires a real
+  // pendingDebt unless manual bankruptcy is also on) — a genuine deadlock.
+  if (state.pendingDebt && currentPlayer(state).id === player.id && state.turnPhase === "awaiting_payment") {
     state.pendingDebt = null;
+  }
+
+  // Remove this player from any auction they were part of — a bankrupt
+  // bidder's cash is gone, their bids shouldn't be able to win. If they
+  // held the effective high bid, auctionHighBid naturally reverts to the
+  // next-eligible bidder (or null) since it's always recomputed from
+  // eligiblePlayerIds, not stored. If NO eligible bidders remain at all,
+  // the auction can never resolve on its own (nobody left to place a
+  // winning bid, though it still WILL eventually timeout-resolve since
+  // RESOLVE_AUCTION_TIMEOUT isn't gated to auction participants) — finish
+  // it immediately rather than leave it hanging.
+  if (state.pendingAuction && state.pendingAuction.eligiblePlayerIds.includes(player.id)) {
+    const auction = state.pendingAuction;
+    const wasHighBidder = auctionHighBid(auction)?.playerId === player.id;
+    auction.eligiblePlayerIds = auction.eligiblePlayerIds.filter((id) => id !== player.id);
+    if (wasHighBidder) {
+      events.push({ type: "AUCTION_BIDDER_DISQUALIFIED", playerId: player.id, spaceIndex: auction.spaceIndex });
+    }
+    if (auction.eligiblePlayerIds.length === 0) {
+      finishAuction(state, events);
+    }
   }
 
   const solvent = state.players.filter((p) => !p.bankrupt);
@@ -849,7 +892,11 @@ function resolveBankruptcy(
     if (state.winnerPlayerId) {
       events.push({ type: "GAME_OVER", winnerPlayerId: state.winnerPlayerId });
     }
-  } else if (state.currentPlayerIndex === state.players.indexOf(player)) {
+  } else if (state.currentPlayerIndex === state.players.indexOf(player) && !state.pendingAuction) {
+    // If an auction is still open, defer the turn-advance to finishAuction
+    // instead — forcing turnPhase to "awaiting_roll" here would strand the
+    // still-live auction (PLACE_BID/RESOLVE_AUCTION_TIMEOUT both require
+    // turnPhase === "awaiting_auction" and would silently no-op forever).
     advanceTurn(state, events);
   }
 }
@@ -1118,68 +1165,90 @@ function handleDeclineBuy(state: GameState, playerId: string, events: GameEvent[
   const spaceIndex = player.position;
   events.push({ type: "PROPERTY_DECLINED", playerId: player.id, spaceIndex });
   if (state.settings.auctionOnDecline) {
-    startAuction(state, spaceIndex, events);
+    startAuction(state, spaceIndex, false, events);
     return;
   }
   state.turnPhase = nextPhaseAfterResolution(state);
 }
 
-// ============================================================================
-// auctions (settings.auctionOnDecline)
-// ============================================================================
-
-function startAuction(state: GameState, spaceIndex: number, events: GameEvent[]): void {
-  const eligiblePlayerIds = state.players.filter((p) => !p.bankrupt).map((p) => p.id);
-  if (eligiblePlayerIds.length === 0) return;
-  const startIndex = nextActivePlayerIndex(state.players, state.currentPlayerIndex);
-  state.pendingAuction = {
-    spaceIndex,
-    highestBid: 0,
-    highestBidderId: null,
-    eligiblePlayerIds,
-    turnPlayerId: state.players[startIndex].id,
-  };
-  state.turnPhase = "awaiting_auction";
-  events.push({ type: "AUCTION_STARTED", spaceIndex });
+// Manual "Put up for auction" (beside Buy/Decline) — works regardless of
+// settings.auctionOnDecline, which only governs the automatic trigger on a
+// plain decline. Still only the current player, still only while the
+// purchase decision is live.
+function handleStartAuction(state: GameState, playerId: string, events: GameEvent[]): void {
+  const player = currentPlayer(state);
+  if (player.id !== playerId || state.turnPhase !== "awaiting_purchase") return;
+  const spaceIndex = player.position;
+  if (state.ownership[spaceIndex]) return;
+  events.push({ type: "PROPERTY_DECLINED", playerId: player.id, spaceIndex });
+  startAuction(state, spaceIndex, true, events);
 }
 
-function advanceAuctionTurn(state: GameState): void {
-  const auction = state.pendingAuction;
-  if (!auction) return;
-  const order = state.players.filter((p) => auction.eligiblePlayerIds.includes(p.id));
-  if (order.length === 0) return;
-  const currentIdx = order.findIndex((p) => p.id === auction.turnPlayerId);
-  const next = order[(currentIdx + 1) % order.length];
-  auction.turnPlayerId = next.id;
+// ============================================================================
+// auctions — simultaneous and timer-driven (Section 3), not turn-by-turn.
+// The countdown deadline itself lives outside this pure engine (see
+// GameState.auctionDeadline's own comment) — reduce() only ever sees
+// PLACE_BID (from any eligible player, any time) or RESOLVE_AUCTION_TIMEOUT
+// (dispatched by the API layer once it's verified the deadline passed).
+// ============================================================================
+
+function startAuction(state: GameState, spaceIndex: number, manual: boolean, events: GameEvent[]): void {
+  const eligiblePlayerIds = state.players.filter((p) => !p.bankrupt).map((p) => p.id);
+  if (eligiblePlayerIds.length === 0) return;
+  state.pendingAuction = { spaceIndex, eligiblePlayerIds, bids: [] };
+  state.turnPhase = "awaiting_auction";
+  events.push({ type: "AUCTION_STARTED", spaceIndex, manual });
+}
+
+// The effective high bid is always recomputed from the full bid ledger
+// filtered to still-eligible bidders — never stored redundantly — so a
+// disqualified (bankrupt) bidder's offer silently falls back to whoever's
+// next without any special-case "revert" logic elsewhere.
+// Exported so the auction UI computes "who's leading, at what amount"
+// using the exact same logic finishAuction actually pays out on, rather
+// than a re-derived copy that could drift — same reasoning as
+// computePropertyRent/computeTransportRent above.
+export function auctionHighBid(auction: PendingAuction): { playerId: string; amount: number } | null {
+  let best: { playerId: string; amount: number } | null = null;
+  for (const bid of auction.bids) {
+    if (!auction.eligiblePlayerIds.includes(bid.playerId)) continue;
+    if (!best || bid.amount > best.amount) best = bid;
+  }
+  return best;
 }
 
 function finishAuction(state: GameState, events: GameEvent[]): void {
   const auction = state.pendingAuction;
   if (!auction) return;
+  const high = auctionHighBid(auction);
 
-  if (auction.highestBidderId) {
-    const winner = findPlayer(state, auction.highestBidderId);
+  if (high) {
+    const winner = findPlayer(state, high.playerId);
     if (winner) {
-      winner.cashCents -= auction.highestBid;
+      winner.cashCents -= high.amount;
       state.ownership[auction.spaceIndex] = {
         ownerId: winner.id,
         houses: 0,
         hotel: false,
         mortgaged: false,
       };
-      events.push({
-        type: "AUCTION_WON",
-        playerId: winner.id,
-        spaceIndex: auction.spaceIndex,
-        amount: auction.highestBid,
-      });
+      events.push({ type: "AUCTION_WON", playerId: winner.id, spaceIndex: auction.spaceIndex, amount: high.amount });
     }
   } else {
     events.push({ type: "AUCTION_ENDED_NO_WINNER", spaceIndex: auction.spaceIndex });
   }
 
   state.pendingAuction = null;
-  state.turnPhase = nextPhaseAfterResolution(state);
+  // If the player whose turn this technically still is has since gone
+  // bankrupt (e.g. mid-auction, from an unrelated debt or a voluntary
+  // quit), nextPhaseAfterResolution would hand the turn right back to
+  // someone who can no longer act — advance past them instead. See
+  // resolveBankruptcy's matching deferral for the other half of this.
+  if (currentPlayer(state).bankrupt) {
+    advanceTurn(state, events);
+  } else {
+    state.turnPhase = nextPhaseAfterResolution(state);
+  }
 }
 
 function handlePlaceBid(
@@ -1189,31 +1258,20 @@ function handlePlaceBid(
 ): void {
   const auction = state.pendingAuction;
   if (!auction || state.turnPhase !== "awaiting_auction") return;
-  if (auction.turnPlayerId !== action.playerId) return;
+  if (!auction.eligiblePlayerIds.includes(action.playerId)) return;
   const player = findPlayer(state, action.playerId);
   if (!player) return;
-  if (action.amount <= auction.highestBid) return;
+  const currentHigh = auctionHighBid(auction)?.amount ?? 0;
+  if (action.amount <= currentHigh) return; // stale — "Someone outbid you" (surfaced by the API layer)
   if (player.cashCents < action.amount) return;
 
-  auction.highestBid = action.amount;
-  auction.highestBidderId = action.playerId;
+  auction.bids.push({ playerId: action.playerId, amount: action.amount });
   events.push({ type: "BID_PLACED", playerId: action.playerId, amount: action.amount });
-  advanceAuctionTurn(state);
 }
 
-function handlePassAuction(state: GameState, playerId: string, events: GameEvent[]): void {
-  const auction = state.pendingAuction;
-  if (!auction || state.turnPhase !== "awaiting_auction") return;
-  if (auction.turnPlayerId !== playerId) return;
-
-  auction.eligiblePlayerIds = auction.eligiblePlayerIds.filter((id) => id !== playerId);
-  events.push({ type: "AUCTION_PASSED", playerId });
-
-  if (auction.eligiblePlayerIds.length <= 1) {
-    finishAuction(state, events);
-  } else {
-    advanceAuctionTurn(state);
-  }
+function handleResolveAuctionTimeout(state: GameState, events: GameEvent[]): void {
+  if (!state.pendingAuction || state.turnPhase !== "awaiting_auction") return;
+  finishAuction(state, events);
 }
 
 // (Debt panel choice 2, "Help me raise it") Re-derives the same plan
@@ -1417,18 +1475,44 @@ function handleEndTurn(state: GameState, playerId: string, events: GameEvent[]):
   advanceTurn(state, events);
 }
 
-// (settings.turnTimeLimitSeconds) Forces the current turn to end when the
-// caller (API layer, which owns wall-clock time) has verified turnStartedAt
-// is old enough. Only fires from a phase with nothing left unresolved — an
-// open debt, tax choice, card draw, purchase decision, or auction always
-// wins over the clock; the timer just skips a player who won't roll/end.
+// (Section 3 turn watchdog) Forces the stuck turn to resolve when the
+// caller (API layer, which owns wall-clock time — see turnStartedAt) has
+// verified the game has sat in the same turn_phase with the same current
+// player beyond the turn time limit (settings.turnTimeLimitSeconds, or a
+// 3-minute default when unset — see the API route). "The game must never
+// deadlock": every phase a player can get stuck in has a resolution here,
+// each reusing the exact same handler a real player action would —
+// awaiting_purchase auto-declines (respecting auctionOnDecline, same as a
+// real DECLINE_BUY), awaiting_payment forces the debtor bankrupt (same as
+// a real DECLARE_BANKRUPT), awaiting_roll/awaiting_end_turn just skip the
+// turn. awaiting_auction has its own timeout path (RESOLVE_AUCTION_TIMEOUT)
+// since it isn't turn-bound at all; awaiting_card has no safe forced move
+// here (the drawn card's identity is deck state the pure engine doesn't
+// own — the caller would have to draw one on the player's behalf, which
+// is a product decision, not a mechanical one) and is deliberately left
+// alone.
 function handleForceEndTurn(state: GameState, playerId: string, events: GameEvent[]): void {
   const player = currentPlayer(state);
   if (player.id !== playerId) return;
-  if (state.turnPhase !== "awaiting_roll" && state.turnPhase !== "awaiting_end_turn") return;
 
-  events.push({ type: "TURN_TIMED_OUT", playerId });
-  advanceTurn(state, events);
+  switch (state.turnPhase) {
+    case "awaiting_roll":
+    case "awaiting_end_turn":
+      events.push({ type: "TURN_TIMED_OUT", playerId });
+      advanceTurn(state, events);
+      return;
+    case "awaiting_purchase":
+      events.push({ type: "TURN_TIMED_OUT", playerId });
+      handleDeclineBuy(state, playerId, events);
+      return;
+    case "awaiting_payment":
+      if (!state.pendingDebt) return;
+      events.push({ type: "TURN_TIMED_OUT", playerId });
+      resolveBankruptcy(state, player, state.pendingDebt.creditorId, events);
+      return;
+    default:
+      return;
+  }
 }
 
 // Host-only, lobby-only. Rejected outright once the game is active — settings
@@ -1557,11 +1641,14 @@ export function reduce(state: GameState, action: GameAction): { state: GameState
     case "DECLINE_BUY":
       handleDeclineBuy(draft, action.playerId, events);
       break;
+    case "START_AUCTION":
+      handleStartAuction(draft, action.playerId, events);
+      break;
     case "PLACE_BID":
       handlePlaceBid(draft, action, events);
       break;
-    case "PASS_AUCTION":
-      handlePassAuction(draft, action.playerId, events);
+    case "RESOLVE_AUCTION_TIMEOUT":
+      handleResolveAuctionTimeout(draft, events);
       break;
     case "PAY_RENT":
       handlePayRent(draft, action.playerId, events);

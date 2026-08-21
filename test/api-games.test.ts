@@ -436,7 +436,7 @@ describe("POST /api/games/[code]/action", () => {
     expect(lastStatus).toBe(429);
   });
 
-  it("turnTimeLimitSeconds: OFF rejects FORCE_END_TURN outright; ON only allows it once the clock has actually run out", async () => {
+  it("turnTimeLimitSeconds: ON only allows FORCE_END_TURN once its own clock has run out; OFF falls back to the Section 3 watchdog's 3-minute default", async () => {
     const createRes = await createGame(
       postJson("http://test/api/games", { settings: { randomizePlayerOrder: false, turnTimeLimitSeconds: 60 } }),
     );
@@ -466,7 +466,9 @@ describe("POST /api/games/[code]/action", () => {
     const timedOutBody = await timedOut.json();
     expect(timedOutBody.ok).toBe(true);
 
-    // With the setting OFF, FORCE_END_TURN is rejected regardless of time.
+    // With the setting OFF, FORCE_END_TURN still isn't rejected outright —
+    // the Section 3 turn watchdog's 3-minute fallback applies instead, so
+    // the game can never deadlock just because the host left the limit off.
     const offRes = await createGame(postJson("http://test/api/games", { settings: { randomizePlayerOrder: false } }));
     const { roomCode: offCode } = await offRes.json();
     const offHostJoin = await joinGame(postJson(`http://test/api/games/${offCode}/join`, { name: "Ada", token: "danfo" }), ctx(offCode));
@@ -474,12 +476,23 @@ describe("POST /api/games/[code]/action", () => {
     await joinGame(postJson(`http://test/api/games/${offCode}/join`, { name: "Bola", token: "keke" }), ctx(offCode));
     await startGame(postJson(`http://test/api/games/${offCode}/start`, { clientToken: offHost.clientToken }), ctx(offCode));
     const offGame = fakeAdmin.db.games.find((g) => g.room_code === offCode)!;
+
+    // Still well under 3 minutes -> rejected.
+    offGame.state.turnStartedAt = Date.now() - 30_000;
+    const offTooSoon = await postAction(
+      postJson(`http://test/api/games/${offCode}/action`, { clientToken: offHost.clientToken, action: { type: "FORCE_END_TURN" } }),
+      ctx(offCode),
+    );
+    expect(offTooSoon.status).toBe(409);
+
+    // Past the 3-minute fallback -> allowed.
     offGame.state.turnStartedAt = Date.now() - 1_000_000;
     const offForce = await postAction(
       postJson(`http://test/api/games/${offCode}/action`, { clientToken: offHost.clientToken, action: { type: "FORCE_END_TURN" } }),
       ctx(offCode),
     );
-    expect(offForce.status).toBe(409);
+    expect(offForce.status).toBe(200);
+    expect((await offForce.json()).ok).toBe(true);
   });
 });
 
@@ -768,5 +781,45 @@ describe("trades", () => {
     expect(overCap.status).toBe(409);
     const overCapBody = await overCap.json();
     expect(overCapBody.error).toMatch(/gone on long enough/i);
+  });
+
+  it("CRITICAL: going bankrupt cancels any open trade the player was part of, on both sides", async () => {
+    const createRes = await createGame(
+      postJson("http://test/api/games", { settings: { randomizePlayerOrder: false, allowManualBankruptcy: true } }),
+    );
+    const { roomCode } = await createRes.json();
+    const join1 = await (
+      await joinGame(postJson(`http://test/api/games/${roomCode}/join`, { name: "Ada", token: "danfo" }), ctx(roomCode))
+    ).json();
+    const join2 = await (
+      await joinGame(postJson(`http://test/api/games/${roomCode}/join`, { name: "Bola", token: "keke" }), ctx(roomCode))
+    ).json();
+    await startGame(postJson(`http://test/api/games/${roomCode}/start`, { clientToken: join1.clientToken }), ctx(roomCode));
+
+    const proposeRes = await proposeTrade(
+      postJson(`http://test/api/games/${roomCode}/trades`, {
+        clientToken: join1.clientToken,
+        toPlayerId: join2.playerId,
+        offer: EMPTY,
+        request: EMPTY,
+      }),
+      ctx(roomCode),
+    );
+    const { tradeId } = await proposeRes.json();
+    expect(fakeAdmin.db.trades.find((t: { id: string }) => t.id === tradeId).status).toBe("open");
+
+    // The RECIPIENT (not the proposer, not the current player) goes
+    // bankrupt — the trade must still be cancelled, and the game must not
+    // hang: postAction must complete and return ok.
+    const bankruptRes = await postAction(
+      postJson(`http://test/api/games/${roomCode}/action`, {
+        clientToken: join2.clientToken,
+        action: { type: "DECLARE_BANKRUPT" },
+      }),
+      ctx(roomCode),
+    );
+    const bankruptBody = await bankruptRes.json();
+    expect(bankruptBody.ok).toBe(true);
+    expect(fakeAdmin.db.trades.find((t: { id: string }) => t.id === tradeId).status).toBe("cancelled");
   });
 });
