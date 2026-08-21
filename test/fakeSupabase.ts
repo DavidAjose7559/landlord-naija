@@ -144,6 +144,8 @@ export class FakeSupabaseAdmin {
           return this.counterTrade(args);
         case "respond_trade":
           return this.respondTrade(args);
+        case "dev_seed_state":
+          return this.devSeedState(args);
         default:
           return { data: null, error: { message: `unknown rpc ${fn}` } };
       }
@@ -334,6 +336,31 @@ export class FakeSupabaseAdmin {
     const trade = this.db.trades.find((t) => t.id === args.p_trade_id && t.status === "open");
     if (!trade) return { data: null, error: { message: "that offer is no longer open" } };
     trade.status = args.p_status;
+    return { data: null, error: null };
+  }
+
+  private devSeedState(args: Record<string, any>): FakeResult<null> {
+    const game = this.db.games.find((g) => g.id === args.p_game_id);
+    if (!game) return { data: null, error: { message: "game not found" } };
+    if (game.status === "active" && !args.p_confirm_active) {
+      return { data: null, error: { message: "refusing to seed an active game without p_confirm_active=true" } };
+    }
+    game.state = args.p_new_state;
+    game.current_player_index = args.p_new_state.currentPlayerIndex;
+    game.turn_phase = args.p_new_state.turnPhase;
+    game.doubles_count = args.p_new_state.doublesCount;
+    game.updated_at = new Date().toISOString();
+
+    for (const update of args.p_player_updates as any[]) {
+      const player = this.db.players.find((p) => p.id === update.id && p.game_id === args.p_game_id);
+      if (!player) continue;
+      player.cash_cents = update.cash_cents;
+      player.position = update.position;
+      player.in_jail = update.in_jail;
+      player.jail_turns = update.jail_turns;
+      player.jail_free_cards = update.jail_free_cards;
+      player.bankrupt = update.bankrupt;
+    }
     return { data: null, error: null };
   }
 }

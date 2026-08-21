@@ -22,6 +22,11 @@ export interface UseGameResult {
   setSession: (session: PlayerSession | null) => void;
   dispatch: (action: ClientAction) => Promise<ActionResult | null>;
   refetch: () => Promise<void>;
+  // Dev-only resilience testing (scenario 26): tears down the realtime
+  // channel and blocks every fetch this hook makes for `ms`, then forces a
+  // resync. undefined in production so callers can just check truthiness
+  // to decide whether to render a "simulate disconnect" control at all.
+  simulateDisconnect: ((ms?: number) => void) | undefined;
 }
 
 async function fetchPublicGame(roomCode: string): Promise<{ data: PublicGame | null; errorMessage: string | null }> {
@@ -54,6 +59,22 @@ export function useGame(roomCode: string): UseGameResult {
   const [session, setSessionState] = useState<PlayerSession | null>(null);
 
   const sessionRef = useRef<PlayerSession | null>(null);
+  // Dev-only disconnect simulation (scenario 26). offlineUntilRef gates
+  // every fetch this hook makes; channelRef lets simulateDisconnect tear
+  // down the live realtime subscription from outside the effect that owns
+  // it. Both are inert (0 / null forever) in production.
+  const offlineUntilRef = useRef(0);
+  const channelRef = useRef<RealtimeChannel | null>(null);
+
+  const guardedFetch = useCallback((code: string) => {
+    if (Date.now() < offlineUntilRef.current) {
+      return Promise.resolve<{ data: PublicGame | null; errorMessage: string | null }>({
+        data: null,
+        errorMessage: "simulated disconnect (dev)",
+      });
+    }
+    return fetchPublicGame(code);
+  }, []);
 
   useEffect(() => {
     const stored = loadSession(roomCode);
@@ -75,14 +96,14 @@ export function useGame(roomCode: string): UseGameResult {
   );
 
   const refetch = useCallback(async () => {
-    const { data, errorMessage } = await fetchPublicGame(roomCode);
+    const { data, errorMessage } = await guardedFetch(roomCode);
     if (data) {
       setGame(data);
       setError(null);
     } else if (errorMessage) {
       setError(errorMessage);
     }
-  }, [roomCode]);
+  }, [roomCode, guardedFetch]);
 
   useEffect(() => {
     let cancelled = false;
@@ -91,7 +112,7 @@ export function useGame(roomCode: string): UseGameResult {
     let refetchTimer: ReturnType<typeof setTimeout> | null = null;
 
     async function refetchNow() {
-      const { data, errorMessage } = await fetchPublicGame(roomCode);
+      const { data, errorMessage } = await guardedFetch(roomCode);
       if (cancelled) return;
       if (data) {
         setGame(data);
@@ -140,6 +161,7 @@ export function useGame(roomCode: string): UseGameResult {
             }, 1500);
           }
         });
+      channelRef.current = channel;
     }
 
     async function bootstrap() {
@@ -166,14 +188,19 @@ export function useGame(roomCode: string): UseGameResult {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (refetchTimer) clearTimeout(refetchTimer);
       if (channel) supabase.removeChannel(channel);
+      channelRef.current = null;
     };
-  }, [roomCode]);
+  }, [roomCode, guardedFetch]);
 
   const dispatch = useCallback(
     async (action: ClientAction): Promise<ActionResult | null> => {
       const currentSession = sessionRef.current;
       if (!currentSession) {
         setError("you haven't joined this game yet");
+        return null;
+      }
+      if (Date.now() < offlineUntilRef.current) {
+        setError("simulated disconnect (dev)");
         return null;
       }
 
@@ -214,5 +241,36 @@ export function useGame(roomCode: string): UseGameResult {
     [roomCode],
   );
 
-  return { game, loading, error, pending, reconnecting, session, setSession, dispatch, refetch };
+  // Tears down the live realtime channel (a real unsubscribe, not a faked
+  // status flag — the existing CHANNEL_ERROR/CLOSED handling above is what
+  // actually fires and drives `reconnecting`) and blocks every fetch this
+  // hook makes for `ms`. The channel is free to reconnect on its own
+  // schedule during the window (proving that path still works); what stays
+  // deliberately down for the full `ms` is data access, so recovery is
+  // exercised by one clean refetch at the end rather than by chance.
+  const simulateDisconnect = useCallback(
+    (ms = 10_000) => {
+      offlineUntilRef.current = Date.now() + ms;
+      setReconnecting(true);
+      channelRef.current?.unsubscribe();
+      setTimeout(() => {
+        offlineUntilRef.current = 0;
+        void refetch();
+      }, ms);
+    },
+    [refetch],
+  );
+
+  return {
+    game,
+    loading,
+    error,
+    pending,
+    reconnecting,
+    session,
+    setSession,
+    dispatch,
+    refetch,
+    simulateDisconnect: process.env.NODE_ENV !== "production" ? simulateDisconnect : undefined,
+  };
 }

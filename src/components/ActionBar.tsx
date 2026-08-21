@@ -318,7 +318,7 @@ function DebtPanel({
         >
           Pay {formatCAD(debt.amount)}
         </button>
-        {shortfall > 0 && plan?.sufficient && (
+        {shortfall > 0 && (
           <button
             type="button"
             disabled={busy}
@@ -338,7 +338,7 @@ function DebtPanel({
         </button>
       </div>
 
-      {showPlan && plan && (
+      {showPlan && plan && plan.sufficient && (
         <Modal onClose={() => setShowPlan(false)} className="max-w-sm gap-3">
           <h3 className="text-base font-bold text-ink">Raise {formatCAD(shortfall)} automatically?</h3>
           <p className="text-sm text-ink">
@@ -370,6 +370,28 @@ function DebtPanel({
               Cancel
             </button>
           </div>
+        </Modal>
+      )}
+
+      {/* (Section H finding, scenario 20) computeDebtReliefPlan's insufficient
+          case used to just hide "Help me raise it" entirely — a player with
+          nothing to liquidate (or not enough) got no feedback at all about
+          why. This tells them plainly instead of staying silent. */}
+      {showPlan && plan && !plan.sufficient && (
+        <Modal onClose={() => setShowPlan(false)} className="max-w-sm gap-3">
+          <h3 className="text-base font-bold text-ink">This won&apos;t cover it</h3>
+          <p className="text-sm text-ink">
+            {plan.operations.length === 0
+              ? "You don't have anything left to mortgage or sell."
+              : `Mortgaging and selling everything you have would only raise you to ${formatCAD(plan.projectedCashCents)} — still short by ${formatCAD(Math.max(0, debt.amount - plan.projectedCashCents))}.`}
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowPlan(false)}
+            className="rounded-full bg-surface-2 px-4 py-2.5 text-sm font-semibold text-ink"
+          >
+            Close
+          </button>
         </Modal>
       )}
     </div>

@@ -18,7 +18,7 @@ export default function BoardPage() {
   const { code } = useParams<{ code: string }>();
   const roomCode = code.toUpperCase();
   const router = useRouter();
-  const { game, loading, error, session, pending, reconnecting, dispatch } = useGame(roomCode);
+  const { game, loading, error, session, pending, reconnecting, dispatch, simulateDisconnect } = useGame(roomCode);
 
   const [muted, setMuted] = useState(true);
 
@@ -62,6 +62,18 @@ export default function BoardPage() {
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
           Reconnecting…
         </div>
+      )}
+
+      {/* Dev-only resilience testing (scenario 26) — simulateDisconnect is
+          undefined in production, so this never renders there. */}
+      {simulateDisconnect && (
+        <button
+          type="button"
+          onClick={() => simulateDisconnect(10_000)}
+          className="rounded-full border border-dashed border-accent/40 px-4 py-2 text-center text-xs font-medium text-accent"
+        >
+          Simulate disconnect (10s)
+        </button>
       )}
 
       {!session && (
