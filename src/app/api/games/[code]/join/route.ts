@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { MAX_PLAYERS, STARTING_CASH } from "@/game/board";
+import { DEFAULT_STARTING_CASH, MAX_PLAYERS } from "@/game/board";
 import type { PlayerState } from "@/game/types";
 import { callRpc, loadGameByRoomCode } from "@/lib/api/game-state";
 import { ApiError, errorResponse } from "@/lib/api/errors";
@@ -44,7 +44,7 @@ export async function POST(request: Request, context: { params: Promise<{ code: 
       name: body.name,
       token: body.token,
       seatIndex,
-      cashCents: STARTING_CASH,
+      cashCents: DEFAULT_STARTING_CASH,
       position: 0,
       inJail: false,
       jailTurns: 0,
@@ -60,7 +60,7 @@ export async function POST(request: Request, context: { params: Promise<{ code: 
       p_name: body.name,
       p_token: body.token,
       p_seat_index: seatIndex,
-      p_cash_cents: STARTING_CASH,
+      p_cash_cents: DEFAULT_STARTING_CASH,
       p_client_token: clientToken,
       p_new_state: newState,
     });

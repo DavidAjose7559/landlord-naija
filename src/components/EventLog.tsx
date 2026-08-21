@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { BOARD } from "@/game/board";
+import type { Space } from "@/game/board";
 import type { PlayerState } from "@/game/types";
 import { formatCAD } from "@/lib/money";
 import { supabase } from "@/lib/supabase/client";
@@ -9,6 +9,8 @@ import { supabase } from "@/lib/supabase/client";
 interface EventLogProps {
   gameId: string;
   players: readonly PlayerState[];
+  spaces: readonly Space[];
+  jailLabel: string;
 }
 
 interface EventRow {
@@ -21,17 +23,24 @@ function playerName(players: readonly PlayerState[], id: unknown): string {
   return players.find((p) => p.id === id)?.name ?? "Someone";
 }
 
-function spaceName(index: unknown): string {
+function spaceNameIn(spaces: readonly Space[], index: unknown): string {
   const i = Number(index);
-  return BOARD[i]?.name ?? "somewhere";
+  return spaces[i]?.name ?? "somewhere";
 }
 
 // Turns a raw {type, payload} row into a plain sentence for the feed. A
 // ROLLED event immediately followed by that same player's MOVED event
 // (the normal case — the roll that caused the move) reads as one
 // sentence; everything else renders standalone.
-function describeEvent(event: EventRow, next: EventRow | undefined, players: readonly PlayerState[]): string | null {
+function describeEvent(
+  event: EventRow,
+  next: EventRow | undefined,
+  players: readonly PlayerState[],
+  spaces: readonly Space[],
+  jailLabel: string,
+): string | null {
   const p = event.payload;
+  const spaceName = (index: unknown) => spaceNameIn(spaces, index);
 
   switch (event.type) {
     case "GAME_STARTED":
@@ -70,10 +79,10 @@ function describeEvent(event: EventRow, next: EventRow | undefined, players: rea
     case "UNMORTGAGED":
       return `${playerName(players, p.playerId)} paid off the mortgage on ${spaceName(p.spaceIndex)}.`;
     case "SENT_TO_JAIL":
-      return `${playerName(players, p.playerId)} was sent to Kirikiri.`;
+      return `${playerName(players, p.playerId)} was sent to ${jailLabel}.`;
     case "JAIL_ESCAPED": {
       const method = p.method === "doubles" ? "rolling doubles" : p.method === "fine" ? "paying the fine" : "a jail-free card";
-      return `${playerName(players, p.playerId)} got out of Kirikiri by ${method}.`;
+      return `${playerName(players, p.playerId)} got out of ${jailLabel} by ${method}.`;
     }
     case "PLAYER_BANKRUPT":
       return `${playerName(players, p.playerId)} went bankrupt!`;
@@ -90,7 +99,7 @@ function describeEvent(event: EventRow, next: EventRow | undefined, players: rea
   }
 }
 
-export function EventLog({ gameId, players }: EventLogProps) {
+export function EventLog({ gameId, players, spaces, jailLabel }: EventLogProps) {
   const [events, setEvents] = useState<EventRow[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -138,7 +147,7 @@ export function EventLog({ gameId, players }: EventLogProps) {
   }, [events]);
 
   const lines = events
-    .map((event, i) => ({ seq: event.seq, text: describeEvent(event, events[i + 1], players) }))
+    .map((event, i) => ({ seq: event.seq, text: describeEvent(event, events[i + 1], players, spaces, jailLabel) }))
     .filter((line): line is { seq: number; text: string } => line.text !== null);
 
   return (

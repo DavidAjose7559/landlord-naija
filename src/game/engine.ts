@@ -4,17 +4,21 @@
 
 import { dollars } from "@/lib/money";
 import {
-  BOARD,
   GO_SALARY,
   HOUSE_COST_BY_GROUP,
+  JAIL_INDEX,
+  TRANSPORT_INDEXES,
   TRANSPORT_RENT,
+  UTILITY_INDEXES,
   UTILITY_RENT_MULTIPLIER,
   type ColorGroup,
   type Deck,
   type PropertySpace,
   type Space,
 } from "./board";
-import { DECKS, type Card, type CardEffect } from "./cards";
+import type { Card, CardEffect } from "./cards";
+import { MAPS } from "./maps";
+import type { MapId } from "./maps/types";
 import type {
   GameState,
   PendingDebt,
@@ -24,7 +28,6 @@ import type {
   TurnPhase,
 } from "./types";
 
-const JAIL_INDEX = 10;
 const JAIL_FINE = dollars(50);
 const MAX_JAIL_TURNS = 3;
 const MAX_DOUBLES = 3;
@@ -32,8 +35,13 @@ const MAX_HOUSES_IN_BANK = 32;
 const MAX_HOTELS_IN_BANK = 12;
 const BOARD_SIZE = 40;
 
-const TRANSPORT_INDEXES = BOARD.filter((s) => s.type === "transport").map((s) => s.index);
-const UTILITY_INDEXES = BOARD.filter((s) => s.type === "utility").map((s) => s.index);
+// The 40-space skeleton (which index is which SpaceType) is identical on
+// every map, so board *content* is the only thing that varies per game —
+// looked up fresh from state.mapId wherever it's needed, rather than
+// imported as a fixed module-level constant.
+function boardOf(state: GameState): readonly Space[] {
+  return MAPS[state.mapId].spaces;
+}
 
 // ============================================================================
 // actions / events
@@ -50,6 +58,7 @@ export type GameAction =
   | { type: "SELL_HOUSE"; playerId: string; spaceIndex: number }
   | { type: "MORTGAGE"; playerId: string; spaceIndex: number }
   | { type: "UNMORTGAGE"; playerId: string; spaceIndex: number }
+  | { type: "CHOOSE_TAX"; playerId: string; option: "flat" | "percent" }
   | { type: "PAY_JAIL_FINE"; playerId: string }
   | { type: "USE_JAIL_FREE"; playerId: string }
   | { type: "END_TURN"; playerId: string }
@@ -93,8 +102,9 @@ export type GameEvent =
 // joined. The caller (API layer) pushes players into `players` directly
 // as they join — that's a lobby-only operation, not a GameAction, since
 // joining isn't part of the in-progress turn state machine.
-export function createInitialGameState(): GameState {
+export function createInitialGameState(mapId: MapId): GameState {
   return {
+    mapId,
     status: "lobby",
     turnPhase: "awaiting_roll",
     currentPlayerIndex: 0,
@@ -105,6 +115,7 @@ export function createInitialGameState(): GameState {
     winnerPlayerId: null,
     lastRoll: null,
     pendingCardDeck: null,
+    pendingTaxChoice: null,
     pendingDebt: null,
     trades: [],
     nextTradeId: 1,
@@ -180,23 +191,37 @@ function nextPhaseAfterResolution(state: GameState): TurnPhase {
   return "awaiting_end_turn";
 }
 
-function ownedPropertyIndexesInGroup(color: ColorGroup): number[] {
-  return BOARD.filter((s): s is PropertySpace => s.type === "property" && s.color === color).map(
-    (s) => s.index,
+// True while landing resolution has paused the turn on something that
+// needs its own action before anything else can proceed (a purchase
+// decision, a tax choice, raising cash for a debt, drawing a card).
+function isPausingPhase(state: GameState): boolean {
+  const phase = phaseOf(state);
+  return (
+    phase === "awaiting_purchase" ||
+    phase === "awaiting_tax_choice" ||
+    phase === "awaiting_payment" ||
+    phase === "awaiting_card"
   );
 }
 
+function ownedPropertyIndexesInGroup(state: GameState, color: ColorGroup): number[] {
+  return boardOf(state)
+    .filter((s): s is PropertySpace => s.type === "property" && s.color === color)
+    .map((s) => s.index);
+}
+
 function ownsFullUnmortgagedGroup(state: GameState, ownerId: string, color: ColorGroup): boolean {
-  return ownedPropertyIndexesInGroup(color).every((idx) => {
+  return ownedPropertyIndexesInGroup(state, color).every((idx) => {
     const own = state.ownership[idx];
     return own !== undefined && own.ownerId === ownerId && !own.mortgaged;
   });
 }
 
 function getMortgageableSpace(
+  state: GameState,
   spaceIndex: number,
 ): (Space & { price: number; mortgageValue: number; unmortgageCost: number }) | undefined {
-  const space = BOARD[spaceIndex];
+  const space = boardOf(state)[spaceIndex];
   if (space.type === "property" || space.type === "transport" || space.type === "utility") {
     return space;
   }
@@ -271,7 +296,7 @@ function moveAndResolve(state: GameState, player: PlayerState, steps: number, ev
   const from = player.position;
   const rawTo = from + steps;
   const to = ((rawTo % BOARD_SIZE) + BOARD_SIZE) % BOARD_SIZE;
-  const passedGo = rawTo >= BOARD_SIZE && BOARD[to].type !== "gotojail";
+  const passedGo = rawTo >= BOARD_SIZE && boardOf(state)[to].type !== "gotojail";
 
   payGoIfPassed(player, passedGo, events);
   player.position = to;
@@ -307,7 +332,7 @@ function sendToJail(player: PlayerState, reason: string, events: GameEvent[]): v
 // leaves turnPhase for the caller (moveAndResolve/teleportAndResolve callers
 // higher up) to finalize via nextPhaseAfterResolution.
 function resolveLanding(state: GameState, player: PlayerState, events: GameEvent[]): void {
-  const space = BOARD[player.position];
+  const space = boardOf(state)[player.position];
 
   switch (space.type) {
     case "go":
@@ -320,6 +345,11 @@ function resolveLanding(state: GameState, player: PlayerState, events: GameEvent
       return;
 
     case "tax": {
+      if (space.choice) {
+        state.turnPhase = "awaiting_tax_choice";
+        state.pendingTaxChoice = { spaceIndex: space.index };
+        return;
+      }
       chargeOrDefer(state, player, space.amount, "bank", "tax", events);
       if (state.turnPhase !== "awaiting_payment") {
         events.push({ type: "TAX_PAID", playerId: player.id, amount: space.amount });
@@ -427,11 +457,12 @@ function applyCardEffect(state: GameState, player: PlayerState, card: Card, even
       return;
 
     case "repairs": {
+      const board = boardOf(state);
       let cost = 0;
       for (const [idxStr, own] of Object.entries(state.ownership)) {
         if (own.ownerId !== player.id) continue;
         const idx = Number(idxStr);
-        const space = BOARD[idx];
+        const space = board[idx];
         if (space.type !== "property") continue;
         cost += own.hotel ? effect.perHotel : own.houses * effect.perHouse;
       }
@@ -509,14 +540,14 @@ function totalHotelsInPlay(state: GameState): number {
 }
 
 function canBuildHouse(state: GameState, playerId: string, spaceIndex: number): boolean {
-  const space = BOARD[spaceIndex];
+  const space = boardOf(state)[spaceIndex];
   if (space.type !== "property") return false;
   const own = state.ownership[spaceIndex];
   if (!own || own.ownerId !== playerId || own.mortgaged) return false;
   if (own.hotel) return false;
   if (!ownsFullUnmortgagedGroup(state, playerId, space.color)) return false;
 
-  const group = ownedPropertyIndexesInGroup(space.color);
+  const group = ownedPropertyIndexesInGroup(state, space.color);
   const levels = group.map((idx) => groupHouseLevel(state, idx));
   const thisLevel = groupHouseLevel(state, spaceIndex);
   if (thisLevel !== Math.min(...levels)) return false; // even build rule
@@ -529,14 +560,14 @@ function canBuildHouse(state: GameState, playerId: string, spaceIndex: number): 
 }
 
 function canSellHouse(state: GameState, playerId: string, spaceIndex: number): boolean {
-  const space = BOARD[spaceIndex];
+  const space = boardOf(state)[spaceIndex];
   if (space.type !== "property") return false;
   const own = state.ownership[spaceIndex];
   if (!own || own.ownerId !== playerId) return false;
   const thisLevel = groupHouseLevel(state, spaceIndex);
   if (thisLevel === 0) return false;
 
-  const group = ownedPropertyIndexesInGroup(space.color);
+  const group = ownedPropertyIndexesInGroup(state, space.color);
   const levels = group.map((idx) => groupHouseLevel(state, idx));
   if (thisLevel !== Math.max(...levels)) return false; // even sell rule
   if (thisLevel === 5) {
@@ -558,10 +589,11 @@ function resolveBankruptcy(
   // Houses/hotels always liquidate to the bank at half price before assets
   // move, per the standard rule (and this engine has no auction to sell
   // improved property through otherwise).
+  const board = boardOf(state);
   for (const [idxStr, own] of Object.entries(state.ownership)) {
     if (own.ownerId !== player.id) continue;
     const idx = Number(idxStr);
-    const space = BOARD[idx];
+    const space = board[idx];
     if (space.type !== "property") continue;
     if (own.hotel) {
       player.cashCents += Math.floor(space.houseCost / 2);
@@ -623,7 +655,7 @@ export function netWorth(state: GameState, playerId: string): number {
   let worth = player.cashCents;
   for (const [idxStr, own] of Object.entries(state.ownership)) {
     if (own.ownerId !== playerId) continue;
-    const space = getMortgageableSpace(Number(idxStr));
+    const space = getMortgageableSpace(state, Number(idxStr));
     if (!space) continue;
     worth += own.mortgaged ? 0 : space.price;
     if (space.type === "property") {
@@ -667,7 +699,7 @@ function handleRoll(state: GameState, action: Extract<GameAction, { type: "ROLL"
       player.jailTurns = 0;
       if (phaseOf(state) === "awaiting_payment") return; // must raise the fine first
       moveAndResolve(state, player, action.d1 + action.d2, events);
-      if (phaseOf(state) === "awaiting_purchase" || phaseOf(state) === "awaiting_payment" || phaseOf(state) === "awaiting_card") {
+      if (isPausingPhase(state)) {
         return;
       }
       state.turnPhase = "awaiting_end_turn"; // forced move never grants a re-roll
@@ -697,11 +729,7 @@ function handleRoll(state: GameState, action: Extract<GameAction, { type: "ROLL"
   }
 
   moveAndResolve(state, player, action.d1 + action.d2, events);
-  if (
-    phaseOf(state) === "awaiting_purchase" ||
-    phaseOf(state) === "awaiting_payment" ||
-    phaseOf(state) === "awaiting_card"
-  ) {
+  if (isPausingPhase(state)) {
     return;
   }
   state.turnPhase = nextPhaseAfterResolution(state);
@@ -711,7 +739,7 @@ function handleBuy(state: GameState, playerId: string, events: GameEvent[]): voi
   const player = currentPlayer(state);
   if (player.id !== playerId || state.turnPhase !== "awaiting_purchase") return;
 
-  const space = getMortgageableSpace(player.position);
+  const space = getMortgageableSpace(state, player.position);
   if (!space || state.ownership[player.position]) return;
   if (player.cashCents < space.price) return;
 
@@ -730,6 +758,36 @@ function handleDeclineBuy(state: GameState, playerId: string, events: GameEvent[
   const player = currentPlayer(state);
   if (player.id !== playerId || state.turnPhase !== "awaiting_purchase") return;
   events.push({ type: "PROPERTY_DECLINED", playerId: player.id, spaceIndex: player.position });
+  state.turnPhase = nextPhaseAfterResolution(state);
+}
+
+// Resolves a choice tax space (e.g. Income Tax: flat $200 or 10% of net
+// worth, player's pick). netWorth is computed BEFORE any charge, same as
+// landing on it would see.
+function handleChooseTax(
+  state: GameState,
+  action: Extract<GameAction, { type: "CHOOSE_TAX" }>,
+  events: GameEvent[],
+): void {
+  const player = currentPlayer(state);
+  if (player.id !== action.playerId || state.turnPhase !== "awaiting_tax_choice" || !state.pendingTaxChoice) {
+    return;
+  }
+
+  const space = boardOf(state)[state.pendingTaxChoice.spaceIndex];
+  if (space.type !== "tax" || !space.choice) return;
+
+  const amount =
+    action.option === "flat"
+      ? space.choice.flatAmountCents
+      : Math.round((netWorth(state, player.id) * space.choice.percentOfNetWorth) / 100);
+
+  state.pendingTaxChoice = null;
+  state.turnPhase = "awaiting_end_turn"; // placeholder; chargeOrDefer overwrites if short
+  chargeOrDefer(state, player, amount, "bank", "tax", events);
+  if (phaseOf(state) === "awaiting_payment") return;
+
+  events.push({ type: "TAX_PAID", playerId: player.id, amount });
   state.turnPhase = nextPhaseAfterResolution(state);
 }
 
@@ -761,7 +819,7 @@ function handleDrawCard(
   const player = currentPlayer(state);
   if (player.id !== action.playerId || state.turnPhase !== "awaiting_card" || !state.pendingCardDeck) return;
 
-  const deck = DECKS[state.pendingCardDeck];
+  const deck = MAPS[state.mapId].decks[state.pendingCardDeck];
   const card = deck.find((c) => c.id === action.cardId);
   if (!card) return;
 
@@ -775,11 +833,7 @@ function handleDrawCard(
   state.turnPhase = "awaiting_end_turn";
   applyCardEffect(state, player, card, events);
 
-  if (
-    phaseOf(state) === "awaiting_purchase" ||
-    phaseOf(state) === "awaiting_payment" ||
-    phaseOf(state) === "awaiting_card"
-  ) {
+  if (isPausingPhase(state)) {
     return;
   }
   state.turnPhase = nextPhaseAfterResolution(state);
@@ -791,7 +845,7 @@ function handleBuildHouse(state: GameState, playerId: string, spaceIndex: number
   if (state.turnPhase !== "awaiting_roll" && state.turnPhase !== "awaiting_end_turn") return;
   if (!canBuildHouse(state, playerId, spaceIndex)) return;
 
-  const space = BOARD[spaceIndex] as PropertySpace;
+  const space = boardOf(state)[spaceIndex] as PropertySpace;
   const own = state.ownership[spaceIndex];
   if (player.cashCents < space.houseCost) return;
 
@@ -811,7 +865,7 @@ function handleSellHouse(state: GameState, playerId: string, spaceIndex: number,
   if (state.turnPhase !== "awaiting_roll" && state.turnPhase !== "awaiting_end_turn") return;
   if (!canSellHouse(state, playerId, spaceIndex)) return;
 
-  const space = BOARD[spaceIndex] as PropertySpace;
+  const space = boardOf(state)[spaceIndex] as PropertySpace;
   const own = state.ownership[spaceIndex];
   player.cashCents += Math.floor(space.houseCost / 2);
   if (own.hotel) {
@@ -825,7 +879,7 @@ function handleSellHouse(state: GameState, playerId: string, spaceIndex: number,
 
 function handleMortgage(state: GameState, playerId: string, spaceIndex: number, events: GameEvent[]): void {
   const own = state.ownership[spaceIndex];
-  const space = getMortgageableSpace(spaceIndex);
+  const space = getMortgageableSpace(state, spaceIndex);
   if (!own || !space || own.ownerId !== playerId || own.mortgaged) return;
   if (own.houses > 0 || own.hotel) return;
 
@@ -839,7 +893,7 @@ function handleMortgage(state: GameState, playerId: string, spaceIndex: number, 
 
 function handleUnmortgage(state: GameState, playerId: string, spaceIndex: number, events: GameEvent[]): void {
   const own = state.ownership[spaceIndex];
-  const space = getMortgageableSpace(spaceIndex);
+  const space = getMortgageableSpace(state, spaceIndex);
   if (!own || !space || own.ownerId !== playerId || !own.mortgaged) return;
 
   const player = findPlayer(state, playerId);
@@ -1001,6 +1055,9 @@ export function reduce(state: GameState, action: GameAction): { state: GameState
       break;
     case "UNMORTGAGE":
       handleUnmortgage(draft, action.playerId, action.spaceIndex, events);
+      break;
+    case "CHOOSE_TAX":
+      handleChooseTax(draft, action, events);
       break;
     case "PAY_JAIL_FINE":
       handlePayJailFine(draft, action.playerId, events);

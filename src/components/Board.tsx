@@ -2,7 +2,8 @@
 
 import { motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
-import { BOARD, type Space } from "@/game/board";
+import type { Space } from "@/game/board";
+import { MAPS } from "@/game/maps";
 import type { GameState, PlayerState } from "@/game/types";
 import { formatCAD } from "@/lib/money";
 import { COLOR_GROUP_HEX } from "@/lib/board-colors";
@@ -271,6 +272,7 @@ function cornerIcon(space: Space): string {
 }
 
 export function Board({ state, className }: BoardProps) {
+  const spaces = MAPS[state.mapId].spaces;
   const playersBySpace = new Map<number, PlayerState[]>();
   for (const player of state.players) {
     if (player.bankrupt) continue;
@@ -282,7 +284,7 @@ export function Board({ state, className }: BoardProps) {
   return (
     <div className={`relative mx-auto aspect-square w-full max-w-[720px] ${className ?? ""}`}>
       <div role="grid" aria-label="Game board" className="grid h-full w-full grid-cols-11 grid-rows-11 gap-px bg-canvas">
-        {BOARD.map((space) => (
+        {spaces.map((space) => (
           <BoardSpace key={space.index} space={space} state={state} />
         ))}
       </div>

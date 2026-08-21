@@ -79,7 +79,7 @@ async function resolveConcreteAction(
       }
       const deckState = await loadDeckState(game.id);
       if (!deckState) throw new ApiError(500, "deck state missing");
-      const { cardId, newDeckState } = drawNextCardId(deckState, game.state.pendingCardDeck);
+      const { cardId, newDeckState } = drawNextCardId(deckState, game.state.pendingCardDeck, game.state.mapId);
       return {
         action: { type: "DRAW_CARD", playerId: player.id, cardId },
         rollPayload: null,
@@ -114,6 +114,13 @@ async function resolveConcreteAction(
     case "UNMORTGAGE":
       return {
         action: { type: action.type, playerId: player.id, spaceIndex: action.spaceIndex },
+        rollPayload: null,
+        deckStatePayload: null,
+      };
+
+    case "CHOOSE_TAX":
+      return {
+        action: { type: "CHOOSE_TAX", playerId: player.id, option: action.option },
         rollPayload: null,
         deckStatePayload: null,
       };

@@ -1,4 +1,5 @@
 import type { Deck } from "./board";
+import type { MapId } from "./maps/types";
 
 // Mirrors the `games.state` jsonb column: the full, realtime-synced game
 // state snapshot. Denormalized copies of some fields (roll_index,
@@ -22,6 +23,7 @@ export type PlayerToken =
 export type TurnPhase =
   | "awaiting_roll" // must ROLL (or PAY_JAIL_FINE/USE_JAIL_FREE if in jail)
   | "awaiting_purchase" // landed on an unowned space; BUY or DECLINE_BUY
+  | "awaiting_tax_choice" // landed on a choice tax space; CHOOSE_TAX flat|percent
   | "awaiting_payment" // owes rent/tax/a card's pay effect; see pendingDebt
   | "awaiting_card" // landed on a card space; waiting for a DRAW_CARD action
   | "awaiting_end_turn" // move fully resolved; may build/trade/mortgage, then END_TURN
@@ -77,6 +79,7 @@ export interface TradeProposal {
 }
 
 export interface GameState {
+  mapId: MapId;
   status: GameStatus;
   turnPhase: TurnPhase;
   currentPlayerIndex: number;
@@ -95,6 +98,11 @@ export interface GameState {
   // (which owns deck/shuffle state, outside this pure engine) draws from
   // this deck and dispatches DRAW_CARD with the result.
   pendingCardDeck: Deck | null;
+
+  // Set when the current player has landed on a choice tax space (e.g.
+  // Income Tax); CHOOSE_TAX resolves it into either a direct charge or a
+  // pendingDebt.
+  pendingTaxChoice: { spaceIndex: number } | null;
 
   pendingDebt: PendingDebt | null;
 

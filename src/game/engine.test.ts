@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { BOARD } from "./board";
-import { DECKS } from "./cards";
+import { MAPS } from "./maps";
 import { rollFor } from "./dice";
 import { netWorth, reduce, type GameAction } from "./engine";
 import type { GameState, PlayerState, PlayerToken } from "./types";
 
+const BOARD = MAPS.naija.spaces;
+const DECKS = MAPS.naija.decks;
 const STARTING_CASH = 150_000; // $1,500
 
 function makePlayer(id: string, seatIndex: number, overrides: Partial<PlayerState> = {}): PlayerState {
@@ -26,6 +27,7 @@ function makePlayer(id: string, seatIndex: number, overrides: Partial<PlayerStat
 
 function makeState(players: PlayerState[], overrides: Partial<GameState> = {}): GameState {
   return {
+    mapId: "naija",
     status: "active",
     turnPhase: "awaiting_roll",
     currentPlayerIndex: 0,
@@ -36,6 +38,7 @@ function makeState(players: PlayerState[], overrides: Partial<GameState> = {}): 
     winnerPlayerId: null,
     lastRoll: null,
     pendingCardDeck: null,
+    pendingTaxChoice: null,
     pendingDebt: null,
     trades: [],
     nextTradeId: 1,
@@ -47,10 +50,10 @@ describe("passing GO", () => {
   it("pays exactly once on a card-driven move (moveTo with passGoPays)", () => {
     const state = makeState([makePlayer("p1", 0, { position: 20, cashCents: 10_000 }), makePlayer("p2", 1)], {
       turnPhase: "awaiting_card",
-      pendingCardDeck: "owambe",
+      pendingCardDeck: "treasure",
     });
 
-    const card = DECKS.owambe.find((c) => c.id === "owambe-12")!; // "Head straight to GO." moveTo 0, passGoPays true
+    const card = DECKS.treasure.find((c) => c.id === "owambe-12")!; // "Head straight to GO." moveTo 0, passGoPays true
     expect(card.effect).toEqual({ type: "moveTo", to: 0, passGoPays: true });
 
     const { state: next, events } = reduce(state, { type: "DRAW_CARD", playerId: "p1", cardId: card.id });

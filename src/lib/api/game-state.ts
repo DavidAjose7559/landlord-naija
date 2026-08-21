@@ -1,7 +1,9 @@
 import "server-only";
 
 import type { Deck } from "@/game/board";
-import { DECKS, shuffleDeck } from "@/game/cards";
+import { shuffleDeck } from "@/game/cards";
+import { MAPS } from "@/game/maps";
+import type { MapId } from "@/game/maps/types";
 import type { GameState, GameStatus, PlayerState, TurnPhase } from "@/game/types";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import type { PublicGame } from "./public-game";
@@ -99,8 +101,8 @@ export async function loadGameServerSeed(gameId: string): Promise<string> {
 }
 
 export interface DeckState {
-  owambe: string[];
-  village: string[];
+  treasure: string[];
+  surprise: string[];
 }
 
 export async function loadDeckState(gameId: string): Promise<DeckState | null> {
@@ -114,14 +116,15 @@ export async function loadDeckState(gameId: string): Promise<DeckState | null> {
   return (data?.deck_state as DeckState | null) ?? null;
 }
 
-export function shuffleFreshDecks(): DeckState {
+export function shuffleFreshDecks(mapId: MapId): DeckState {
+  const map = MAPS[mapId];
   return {
-    owambe: shuffleDeck(
-      DECKS.owambe.map((c) => c.id),
+    treasure: shuffleDeck(
+      map.decks.treasure.map((c) => c.id),
       secureRandom,
     ),
-    village: shuffleDeck(
-      DECKS.village.map((c) => c.id),
+    surprise: shuffleDeck(
+      map.decks.surprise.map((c) => c.id),
       secureRandom,
     ),
   };
@@ -134,11 +137,12 @@ export function shuffleFreshDecks(): DeckState {
 export function drawNextCardId(
   deckState: DeckState,
   deck: Deck,
+  mapId: MapId,
 ): { cardId: string; newDeckState: DeckState } {
   let order = deckState[deck];
   if (order.length === 0) {
     order = shuffleDeck(
-      DECKS[deck].map((c) => c.id),
+      MAPS[mapId].decks[deck].map((c) => c.id),
       secureRandom,
     );
   }

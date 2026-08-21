@@ -9,6 +9,7 @@ import { DiceRoller } from "@/components/DiceRoller";
 import { EventLog } from "@/components/EventLog";
 import { PlayerPanel } from "@/components/PlayerPanel";
 import { TradePanel } from "@/components/TradePanel";
+import { MAPS } from "@/game/maps";
 import { useGame } from "@/hooks/useGame";
 
 export default function BoardPage() {
@@ -87,7 +88,12 @@ export default function BoardPage() {
       )}
 
       <PlayerPanel game={game} session={session} dispatch={dispatch} />
-      <EventLog gameId={game.id} players={game.state.players} />
+      <EventLog
+        gameId={game.id}
+        players={game.state.players}
+        spaces={MAPS[game.state.mapId].spaces}
+        jailLabel={MAPS[game.state.mapId].jailLabel}
+      />
 
       {pending && <p className="text-center text-xs text-muted">Syncing…</p>}
     </div>

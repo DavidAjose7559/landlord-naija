@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { BOARD, type ColorGroup } from "@/game/board";
+import type { ColorGroup } from "@/game/board";
+import { MAPS } from "@/game/maps";
 import type { PlayerState } from "@/game/types";
 import type { ClientAction } from "@/lib/api/client-action";
 import type { PublicGame } from "@/lib/api/public-game";
@@ -28,11 +29,12 @@ interface OwnedSpaceInfo {
 }
 
 function ownedSpaces(game: PublicGame, playerId: string): OwnedSpaceInfo[] {
+  const spaces = MAPS[game.state.mapId].spaces;
   return Object.entries(game.state.ownership)
     .filter(([, own]) => own.ownerId === playerId)
     .map(([idxStr, own]) => {
       const idx = Number(idxStr);
-      const space = BOARD[idx];
+      const space = spaces[idx];
       const color = space.type === "property" ? space.color : null;
       const groupKey = color ?? (space.type === "transport" ? "transport" : "utility");
       return {

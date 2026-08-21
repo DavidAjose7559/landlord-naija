@@ -17,7 +17,9 @@ export async function POST(request: Request) {
     await parseJsonBody(request, createGameSchema);
 
     const { seed, hash } = createServerSeed();
-    const state = createInitialGameState();
+    // Defaults to the naija map for now; game settings (including map
+    // choice, configured in the lobby before start) layer on top of this.
+    const state = createInitialGameState("naija");
     const gameId = randomUUID();
 
     let roomCode = generateRoomCode();

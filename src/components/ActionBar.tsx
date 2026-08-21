@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BOARD } from "@/game/board";
 import type { Deck } from "@/game/board";
+import { netWorth } from "@/game/engine";
+import { MAPS } from "@/game/maps";
 import type { ClientAction } from "@/lib/api/client-action";
 import type { PublicGame } from "@/lib/api/public-game";
 import { formatCAD } from "@/lib/money";
@@ -21,13 +22,8 @@ interface DrawnCard {
 }
 
 const DECK_STYLE: Record<Deck, string> = {
-  owambe: "bg-[#3a2a05] border-2 border-[#D4A017] text-[#F5D98B]",
-  village: "bg-[#3a0a0a] border-2 border-[#8B1A1A] text-[#F0A5A5]",
-};
-
-const DECK_LABEL: Record<Deck, string> = {
-  owambe: "Owambe",
-  village: "Village People",
+  treasure: "bg-[#3a2a05] border-2 border-[#D4A017] text-[#F5D98B]",
+  surprise: "bg-[#3a0a0a] border-2 border-[#8B1A1A] text-[#F0A5A5]",
 };
 
 export function ActionBar({ game, session, dispatch }: ActionBarProps) {
@@ -35,6 +31,7 @@ export function ActionBar({ game, session, dispatch }: ActionBarProps) {
   const [message, setMessage] = useState<string | null>(null);
   const [drawnCard, setDrawnCard] = useState<DrawnCard | null>(null);
 
+  const map = MAPS[game.state.mapId];
   const me = session ? game.state.players.find((p) => p.id === session.playerId) : undefined;
   const isMyTurn = me?.id === game.state.players[game.state.currentPlayerIndex]?.id;
 
@@ -75,7 +72,7 @@ export function ActionBar({ game, session, dispatch }: ActionBarProps) {
       {drawnCard && (
         <div className={`flex flex-col gap-3 rounded-2xl p-5 ${DECK_STYLE[drawnCard.deck]}`}>
           <span className="text-xs font-semibold tracking-widest uppercase opacity-80">
-            {DECK_LABEL[drawnCard.deck]}
+            {map.deckLabels[drawnCard.deck]}
           </span>
           <p className="text-base leading-snug font-medium">{drawnCard.text}</p>
           <button
@@ -94,7 +91,9 @@ export function ActionBar({ game, session, dispatch }: ActionBarProps) {
         <>
           {me.inJail && game.turnPhase === "awaiting_roll" && (
             <div className="flex items-center justify-between rounded-2xl bg-surface px-4 py-3">
-              <span className="text-sm text-ink">You&apos;re in Kirikiri (turn {me.jailTurns + 1} of 3).</span>
+              <span className="text-sm text-ink">
+                You&apos;re in {map.jailLabel} (turn {me.jailTurns + 1} of 3).
+              </span>
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -119,6 +118,10 @@ export function ActionBar({ game, session, dispatch }: ActionBarProps) {
           )}
 
           {game.turnPhase === "awaiting_purchase" && <BuyPrompt game={game} busy={busy} act={act} />}
+
+          {game.turnPhase === "awaiting_tax_choice" && game.state.pendingTaxChoice && (
+            <TaxChoicePrompt game={game} busy={busy} act={act} />
+          )}
 
           {game.turnPhase === "awaiting_payment" && game.state.pendingDebt && (
             <div className="flex flex-col gap-3 rounded-2xl bg-surface px-4 py-4">
@@ -154,10 +157,10 @@ export function ActionBar({ game, session, dispatch }: ActionBarProps) {
               disabled={busy}
               onClick={handleDrawCard}
               className={`rounded-2xl px-6 py-4 text-base font-semibold ${
-                game.state.pendingCardDeck === "owambe" ? DECK_STYLE.owambe : DECK_STYLE.village
+                game.state.pendingCardDeck ? DECK_STYLE[game.state.pendingCardDeck] : ""
               } disabled:opacity-60`}
             >
-              Draw {game.state.pendingCardDeck ? DECK_LABEL[game.state.pendingCardDeck] : ""} card
+              Draw {game.state.pendingCardDeck ? map.deckLabels[game.state.pendingCardDeck] : ""} card
             </button>
           )}
 
@@ -189,7 +192,7 @@ function BuyPrompt({
   act: (action: ClientAction) => Promise<{ ok: boolean; reason?: string } | null>;
 }) {
   const player = game.state.players[game.state.currentPlayerIndex];
-  const space = BOARD[player.position];
+  const space = MAPS[game.state.mapId].spaces[player.position];
   if (space.type !== "property" && space.type !== "transport" && space.type !== "utility") return null;
 
   return (
@@ -214,6 +217,49 @@ function BuyPrompt({
           className="flex-1 rounded-full bg-surface-2 px-4 py-2.5 text-sm font-semibold text-ink disabled:opacity-40"
         >
           Decline
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TaxChoicePrompt({
+  game,
+  busy,
+  act,
+}: {
+  game: PublicGame;
+  busy: boolean;
+  act: (action: ClientAction) => Promise<{ ok: boolean; reason?: string } | null>;
+}) {
+  const player = game.state.players[game.state.currentPlayerIndex];
+  const spaceIndex = game.state.pendingTaxChoice?.spaceIndex;
+  const space = spaceIndex !== undefined ? MAPS[game.state.mapId].spaces[spaceIndex] : undefined;
+  if (!space || space.type !== "tax" || !space.choice) return null;
+
+  const percentAmount = Math.round((netWorth(game.state, player.id) * space.choice.percentOfNetWorth) / 100);
+
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl bg-surface px-4 py-4">
+      <p className="text-sm text-ink">
+        <span className="font-semibold">{space.name}</span> — pay a flat amount, or a percentage of your net worth?
+      </p>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => act({ type: "CHOOSE_TAX", option: "flat" })}
+          className="flex-1 rounded-full bg-surface-2 px-4 py-2.5 text-sm font-semibold text-ink disabled:opacity-40"
+        >
+          Pay {formatCAD(space.choice.flatAmountCents)}
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => act({ type: "CHOOSE_TAX", option: "percent" })}
+          className="flex-1 rounded-full bg-surface-2 px-4 py-2.5 text-sm font-semibold text-ink disabled:opacity-40"
+        >
+          Pay {space.choice.percentOfNetWorth}% ({formatCAD(percentAmount)})
         </button>
       </div>
     </div>

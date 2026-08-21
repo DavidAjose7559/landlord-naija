@@ -36,13 +36,13 @@ export async function POST(request: Request, context: { params: Promise<{ code: 
     }
 
     const { state: newState } = reduce(game.state, { type: "START_GAME" });
-    const decks = shuffleFreshDecks();
+    const decks = shuffleFreshDecks(game.state.mapId);
 
     await callRpc("start_game", {
       p_game_id: game.id,
       p_new_state: newState,
-      p_owambe_deck: decks.owambe,
-      p_village_deck: decks.village,
+      p_treasure_deck: decks.treasure,
+      p_surprise_deck: decks.surprise,
     });
 
     const updated = await loadGameByRoomCode(roomCode);

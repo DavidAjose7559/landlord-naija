@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { BOARD } from "@/game/board";
+import { MAPS } from "@/game/maps";
 import type { ClientAction } from "@/lib/api/client-action";
 import type { PublicGame } from "@/lib/api/public-game";
 import type { PlayerSession } from "@/lib/session";
@@ -160,8 +160,8 @@ export function TradePanel({ game, session, dispatch }: TradePanelProps) {
             <h2 className="text-lg font-bold text-ink">
               {game.state.players.find((p) => p.id === incoming.fromPlayerId)?.name ?? "A player"} proposes a trade
             </h2>
-            <OfferSummary label="They give you" offer={incoming.give} />
-            <OfferSummary label="They want" offer={incoming.receive} />
+            <OfferSummary label="They give you" offer={incoming.give} spaces={MAPS[game.state.mapId].spaces} />
+            <OfferSummary label="They want" offer={incoming.receive} spaces={MAPS[game.state.mapId].spaces} />
             <div className="flex gap-2">
               <button
                 type="button"
@@ -200,7 +200,8 @@ function OfferEditor({
   offer: OfferDraft;
   onChange: (offer: OfferDraft) => void;
 }) {
-  const spaces = tradableSpaceIndexes(game, ownerId);
+  const tradableIndexes = tradableSpaceIndexes(game, ownerId);
+  const mapSpaces = MAPS[game.state.mapId].spaces;
 
   function toggleSpace(idx: number) {
     const has = offer.spaceIndexes.includes(idx);
@@ -242,12 +243,12 @@ function OfferEditor({
         </label>
       )}
 
-      {spaces.length > 0 && (
+      {tradableIndexes.length > 0 && (
         <div className="flex flex-col gap-1">
-          {spaces.map((idx) => (
+          {tradableIndexes.map((idx) => (
             <label key={idx} className="flex items-center gap-2 text-xs text-ink">
               <input type="checkbox" checked={offer.spaceIndexes.includes(idx)} onChange={() => toggleSpace(idx)} />
-              {BOARD[idx].name}
+              {mapSpaces[idx].name}
             </label>
           ))}
         </div>
@@ -256,14 +257,22 @@ function OfferEditor({
   );
 }
 
-function OfferSummary({ label, offer }: { label: string; offer: OfferDraft }) {
+function OfferSummary({
+  label,
+  offer,
+  spaces,
+}: {
+  label: string;
+  offer: OfferDraft;
+  spaces: readonly { name: string }[];
+}) {
   return (
     <div className="flex flex-col gap-1 rounded-xl bg-surface-2 p-3 text-sm text-ink">
       <span className="text-xs font-semibold tracking-wide text-muted uppercase">{label}</span>
       {offer.cashCents > 0 && <Money cents={offer.cashCents} />}
       {offer.jailFreeCards > 0 && <span>{offer.jailFreeCards} jail-free card(s)</span>}
       {offer.spaceIndexes.map((idx) => (
-        <span key={idx}>{BOARD[idx]?.name}</span>
+        <span key={idx}>{spaces[idx]?.name}</span>
       ))}
       {offer.cashCents === 0 && offer.jailFreeCards === 0 && offer.spaceIndexes.length === 0 && (
         <span className="text-muted">Nothing</span>

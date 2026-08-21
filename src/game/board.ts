@@ -1,3 +1,10 @@
+// Shared, map-agnostic space-building toolkit: types, rent/mortgage
+// formulas, and builder functions. The 40-space *skeleton* (which index is
+// which SpaceType) is identical across every map — only names, regions,
+// and prices vary — so this file has no board data of its own anymore.
+// Each file under src/game/maps/ uses these builders to construct its own
+// `spaces` array; src/game/maps/index.ts is the map registry.
+
 import { dollars } from "@/lib/money";
 
 export type SpaceType =
@@ -21,7 +28,10 @@ export type ColorGroup =
   | "green"
   | "darkblue";
 
-export type Deck = "owambe" | "village";
+// Generic engine/UI terms (previously "owambe"/"village", which are now
+// just the naija map's flavour label for these same two deck slots — see
+// GameMap.deckLabels).
+export type Deck = "treasure" | "surprise";
 
 export interface GoSpace {
   index: number;
@@ -54,11 +64,18 @@ export interface CardSpace {
   deck: Deck;
 }
 
+// A tax space is either a flat charge, or (space 4 on every map) a choice
+// between a flat amount and a percentage of the payer's net worth — the
+// player picks at landing time (TurnPhase "awaiting_tax_choice").
 export interface TaxSpace {
   index: number;
   name: string;
   type: "tax";
-  amount: number;
+  amount: number; // flat charge in cents; for a choice space, this is the flat option
+  choice?: {
+    flatAmountCents: number;
+    percentOfNetWorth: number; // e.g. 10 for 10%
+  };
 }
 
 export interface TransportSpace {
@@ -106,9 +123,10 @@ export type Space =
   | PropertySpace;
 
 export const GO_SALARY = dollars(200);
-export const STARTING_CASH = dollars(1500);
-// One of each PlayerToken (there are exactly 8 pieces).
+export const STARTING_CASH_OPTIONS = [1000, 1500, 2000, 2500].map(dollars);
+export const DEFAULT_STARTING_CASH = dollars(1500);
 export const MAX_PLAYERS = 8;
+export const MIN_PLAYERS = 2;
 
 export const HOUSE_COST_BY_GROUP: Record<ColorGroup, number> = {
   brown: dollars(50),
@@ -131,6 +149,16 @@ export const UTILITY_RENT_MULTIPLIER = {
   oneOwned: 4,
   allOwned: 10,
 } as const;
+
+// The 40-space skeleton's structural positions — identical on every map.
+export const JAIL_INDEX = 10;
+export const FREE_PARKING_INDEX = 20;
+export const GOTOJAIL_INDEX = 30;
+export const TRANSPORT_INDEXES = [5, 15, 25, 35] as const;
+export const UTILITY_INDEXES = [12, 28] as const;
+export const TAX_INDEXES = [4, 38] as const;
+export const TREASURE_CARD_INDEXES = [2, 17, 33] as const;
+export const SURPRISE_CARD_INDEXES = [7, 22, 36] as const;
 
 // Note: if a player owns every property in a colour group (none mortgaged),
 // the 0-house rent tier is doubled. That is a runtime rule applied by the
@@ -158,7 +186,7 @@ function computeMortgage(priceCents: number): {
   return { mortgageValue, unmortgageCost };
 }
 
-function makeProperty(
+export function makeProperty(
   index: number,
   name: string,
   color: ColorGroup,
@@ -179,65 +207,40 @@ function makeProperty(
   };
 }
 
-function makeTransport(index: number, name: string, priceDollars: number): TransportSpace {
+export function makeTransport(index: number, name: string, priceDollars: number): TransportSpace {
   const price = dollars(priceDollars);
   const { mortgageValue, unmortgageCost } = computeMortgage(price);
   return { index, name, type: "transport", price, mortgageValue, unmortgageCost };
 }
 
-function makeUtility(index: number, name: string, priceDollars: number): UtilitySpace {
+export function makeUtility(index: number, name: string, priceDollars: number): UtilitySpace {
   const price = dollars(priceDollars);
   const { mortgageValue, unmortgageCost } = computeMortgage(price);
   return { index, name, type: "utility", price, mortgageValue, unmortgageCost };
 }
 
-function makeTax(index: number, name: string, amountDollars: number): TaxSpace {
+// Space 38 on every map: a plain flat tax.
+export function makeTax(index: number, name: string, amountDollars: number): TaxSpace {
   return { index, name, type: "tax", amount: dollars(amountDollars) };
 }
 
-function makeCard(index: number, name: string, deck: Deck): CardSpace {
-  return { index, name, type: "card", deck };
+// Space 4 on every map: Income Tax, a flat-or-percent-of-net-worth choice.
+export function makeChoiceTax(
+  index: number,
+  name: string,
+  flatAmountDollars: number,
+  percentOfNetWorth: number,
+): TaxSpace {
+  const flatAmountCents = dollars(flatAmountDollars);
+  return {
+    index,
+    name,
+    type: "tax",
+    amount: flatAmountCents,
+    choice: { flatAmountCents, percentOfNetWorth },
+  };
 }
 
-export const BOARD: readonly Space[] = [
-  { index: 0, name: "GO", type: "go" },
-  makeProperty(1, "Agege", "brown", 50),
-  makeCard(2, "Owambe", "owambe"),
-  makeProperty(3, "Mushin", "brown", 55),
-  makeTax(4, "Agbero Levy", 180),
-  makeTransport(5, "Oshodi Bus Terminal", 190),
-  makeProperty(6, "Ojuelegba", "lightblue", 90),
-  makeCard(7, "Village People", "village"),
-  makeProperty(8, "Yaba", "lightblue", 90),
-  makeProperty(9, "Surulere", "lightblue", 110),
-  { index: 10, name: "Kirikiri", type: "jail" },
-  makeProperty(11, "Ikeja City Mall", "pink", 130),
-  makeUtility(12, "NEPA", 140),
-  makeProperty(13, "Ogba", "pink", 130),
-  makeProperty(14, "Berger", "pink", 150),
-  makeTransport(15, "Ojota Motor Park", 190),
-  makeProperty(16, "Bodija, Ibadan", "orange", 170),
-  makeCard(17, "Owambe", "owambe"),
-  makeProperty(18, "Ring Road, Benin", "orange", 170),
-  makeProperty(19, "Independence Layout, Enugu", "orange", 190),
-  { index: 20, name: "Detty December", type: "free" },
-  makeProperty(21, "Nassarawa GRA, Kano", "red", 210),
-  makeCard(22, "Village People", "village"),
-  makeProperty(23, "Old GRA, Port Harcourt", "red", 210),
-  makeProperty(24, "Ikeja GRA", "red", 230),
-  makeTransport(25, "Murtala Muhammed Airport", 190),
-  makeProperty(26, "Lekki Phase 1", "yellow", 250),
-  makeProperty(27, "Oniru", "yellow", 250),
-  makeUtility(28, "Lagos Water Corporation", 140),
-  makeProperty(29, "Wuse II, Abuja", "yellow", 270),
-  { index: 30, name: "Go To Kirikiri", type: "gotojail" },
-  makeProperty(31, "Victoria Island", "green", 290),
-  makeProperty(32, "Ikoyi", "green", 290),
-  makeCard(33, "Owambe", "owambe"),
-  makeProperty(34, "Maitama, Abuja", "green", 310),
-  makeTransport(35, "Blue Line Rail, Lagos", 190),
-  makeCard(36, "Village People", "village"),
-  makeProperty(37, "Banana Island", "darkblue", 340),
-  makeTax(38, "Customs Duty", 100),
-  makeProperty(39, "Eko Atlantic", "darkblue", 380),
-];
+export function makeCard(index: number, name: string, deck: Deck): CardSpace {
+  return { index, name, type: "card", deck };
+}
