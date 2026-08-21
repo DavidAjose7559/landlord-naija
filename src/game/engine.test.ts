@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { MAPS } from "./maps";
+import type { PropertySpace } from "./board";
 import { rollFor } from "./dice";
-import { computeDebtReliefPlan, netWorth, reduce, type GameAction } from "./engine";
+import { computeDebtReliefPlan, netWorth, netWorthBreakdown, reduce, type GameAction } from "./engine";
 import { DEFAULT_SETTINGS, type GameState, type PlayerState, type PlayerToken } from "./types";
 
 const BOARD = MAPS.naija.spaces;
@@ -762,6 +763,45 @@ describe("debt relief", () => {
     });
     const { state: next } = reduce(state, { type: "DECLARE_BANKRUPT", playerId: "p1" });
     expect(next.players[0].bankrupt).toBe(true);
+  });
+});
+
+// Section F: the winner screen's net worth breakdown.
+describe("netWorthBreakdown", () => {
+  it("itemizes cash, property, houses, and mortgage debt, summing to its own total", () => {
+    const state = makeState([makePlayer("p1", 0, { cashCents: 5_000 })], {
+      ownership: {
+        1: { ownerId: "p1", houses: 2, hotel: false, mortgaged: false }, // Agege, unmortgaged, 2 houses
+        3: { ownerId: "p1", houses: 0, hotel: false, mortgaged: true }, // Mushin, mortgaged, bare
+      },
+    });
+    const breakdown = netWorthBreakdown(state, "p1");
+    const agege = BOARD[1] as PropertySpace;
+    const mushin = BOARD[3] as PropertySpace;
+
+    expect(breakdown.cashCents).toBe(5_000);
+    expect(breakdown.propertyValueCents).toBe(agege.price + mushin.price);
+    expect(breakdown.houseValueCents).toBe(2 * agege.houseCost);
+    expect(breakdown.mortgageDebtCents).toBe(mushin.mortgageValue);
+    expect(breakdown.totalCents).toBe(
+      breakdown.cashCents + breakdown.propertyValueCents + breakdown.houseValueCents - breakdown.mortgageDebtCents,
+    );
+    // Deliberately not the same figure as netWorth(): that function treats
+    // a mortgaged property as worth 0 (a crude shortcut used for in-game
+    // mechanics like percent-of-net-worth tax); this breakdown instead
+    // shows it at full value with the mortgage as its own negative line,
+    // which is the more informative picture the winner screen wants.
+  });
+
+  it("returns all zeros for an unknown player", () => {
+    const state = makeState([makePlayer("p1", 0)]);
+    expect(netWorthBreakdown(state, "nobody")).toEqual({
+      cashCents: 0,
+      propertyValueCents: 0,
+      houseValueCents: 0,
+      mortgageDebtCents: 0,
+      totalCents: 0,
+    });
   });
 });
 

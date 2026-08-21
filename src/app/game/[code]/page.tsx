@@ -9,6 +9,7 @@ import { DiceRoller } from "@/components/DiceRoller";
 import { EventLog } from "@/components/EventLog";
 import { PlayerPanel } from "@/components/PlayerPanel";
 import { TradePanel } from "@/components/TradePanel";
+import { WinnerScreen } from "@/components/WinnerScreen";
 import { MAPS } from "@/game/maps";
 import { useGame } from "@/hooks/useGame";
 
@@ -69,16 +70,6 @@ export default function BoardPage() {
         </div>
       )}
 
-      {game.status === "finished" && (
-        <div className="rounded-2xl bg-surface px-5 py-4 text-center">
-          <p className="text-sm text-ink">
-            {game.state.winnerPlayerId
-              ? `${game.state.players.find((p) => p.id === game.state.winnerPlayerId)?.name ?? "A player"} wins!`
-              : "The game has ended."}
-          </p>
-        </div>
-      )}
-
       {game.status === "active" && (
         <>
           <DiceRoller game={game} isMyTurn={isMyTurn} dispatch={dispatch} muted={muted} />
@@ -120,6 +111,8 @@ export default function BoardPage() {
           {panelContent}
         </div>
       </div>
+
+      {game.status === "finished" && game.state.winnerPlayerId && <WinnerScreen game={game} roomCode={roomCode} />}
     </div>
   );
 }

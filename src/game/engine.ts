@@ -716,6 +716,44 @@ export function netWorth(state: GameState, playerId: string): number {
   return worth;
 }
 
+// (Winner screen) The same total as netWorth, itemized — property value
+// is counted at full price regardless of mortgage status, with the
+// outstanding mortgage shown as its own negative line rather than just
+// zeroing the property out.
+export interface NetWorthBreakdown {
+  cashCents: number;
+  propertyValueCents: number;
+  houseValueCents: number;
+  mortgageDebtCents: number;
+  totalCents: number;
+}
+
+export function netWorthBreakdown(state: GameState, playerId: string): NetWorthBreakdown {
+  const player = findPlayer(state, playerId);
+  if (!player) {
+    return { cashCents: 0, propertyValueCents: 0, houseValueCents: 0, mortgageDebtCents: 0, totalCents: 0 };
+  }
+
+  let propertyValueCents = 0;
+  let houseValueCents = 0;
+  let mortgageDebtCents = 0;
+  for (const [idxStr, own] of Object.entries(state.ownership)) {
+    if (own.ownerId !== playerId) continue;
+    const space = getMortgageableSpace(state, Number(idxStr));
+    if (!space) continue;
+    propertyValueCents += space.price;
+    if (own.mortgaged) mortgageDebtCents += space.mortgageValue;
+    if (space.type === "property") {
+      const houseCost = HOUSE_COST_BY_GROUP[space.color];
+      houseValueCents += own.hotel ? houseCost * 5 : own.houses * houseCost;
+    }
+  }
+
+  const cashCents = player.cashCents;
+  const totalCents = cashCents + propertyValueCents + houseValueCents - mortgageDebtCents;
+  return { cashCents, propertyValueCents, houseValueCents, mortgageDebtCents, totalCents };
+}
+
 // ============================================================================
 // debt relief ("Help me raise it")
 // ============================================================================
