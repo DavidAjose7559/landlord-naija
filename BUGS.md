@@ -365,3 +365,58 @@ updated live.
   missing or wrong secret, both via unit tests and directly with `curl`
   against the running dev server.
 
+## 7. Bug report button was mounted per-page, not global
+
+**Repro:** the 🐛 button only existed on the two pages that explicitly
+imported and rendered `<BugReportButton>` (the board and the lobby). Every
+other route — home, `/rules`, the fairness/verify page, and any future page
+— had no way to file a report at all, and nothing would have caught a new
+page silently missing it.
+
+**Fix:** `BugReportButton` is now mounted exactly once, in the root layout,
+after `{children}`. It's also been rewritten to take no props at all —
+previously it needed `roomCode`/`session` threaded down from whichever page
+rendered it, which is exactly the kind of per-page wiring that's easy to
+forget. It now derives the room code from the current path itself
+(`usePathname()` + a regex against `/game/[code]...`) and loads that room's
+session from `localStorage` at submit time — the same storage `useGame`
+already reads, just read directly instead of threaded through props.
+
+**Also fixed as part of the same pass:**
+- **No-game submissions.** A report filed from a page with no active game
+  (home, `/rules`) used to be impossible — the request schema required
+  `roomCode`. The whole `game` half of the snapshot type
+  (`BugReportGameSnapshot`) is now nullable as one unit, set to `null`
+  when `roomCode` is absent from the request, rather than a bag of
+  independently-nullable fields a caller could forget to check. A new
+  `path` field (the route the reporter was actually on) is always
+  captured, game or not.
+- **Full-screen overlays sitting on top of the button.** WinnerScreen (and
+  any other `z-50` full-screen takeover) previously had the same z-index
+  as the bug button's `z-[45]` — a tie broken by DOM order, which happened
+  to go the button's way before but wasn't guaranteed. Bumped to `z-[60]`,
+  explicitly above every overlay in the app, so this can't regress if a
+  future overlay is added at `z-50` or if the mount point ever moves.
+- **Commit SHA showing "unknown" locally.** `NEXT_PUBLIC_COMMIT_SHA`
+  fell back to `""` outside Vercel, which the button then mapped to
+  `null`, which the markdown formatter rendered as "unknown" — the same
+  label a genuinely indeterminate historical row would show. Falls back
+  to the literal string `"local-dev"` now, so a report filed against
+  `pnpm dev` reads unambiguously as local, not as "no idea what build
+  this was."
+
+**Status:** fixed and verified. Confirmed the button renders on `/`,
+`/rules`, `/game/[code]/lobby`, `/game/[code]`, and
+`/game/[code]/verify`. Drove a real game to a bankruptcy-triggered finish
+(hotel-covered monopoly + an unpayable debt, same technique as the
+seed-state harness notes below) to confirm the button — and, when opened,
+its own modal — render visibly on top of the full-screen `WinnerScreen`
+takeover rather than behind it. Submitted a report from `/rules` with no
+active game and confirmed it succeeded ("Logged. Thanks — that helps."),
+and that `GET /api/bugs` shows `(no active game — filed from /rules)` for
+its relevant-state section rather than erroring or faking game data. New
+unit test covers the no-roomCode case end-to-end (game_id/room_code null,
+`snapshot.game` null, reporter "Anonymous"). Confirmed `Commit: local-dev`
+locally; production commit SHA populating correctly is verified separately
+once deployed (see README).
+

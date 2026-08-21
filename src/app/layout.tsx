@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { BugReportButton } from "@/components/BugReportButton";
 import { DiagnosticsBoot } from "@/components/DiagnosticsBoot";
 import "./globals.css";
 
@@ -42,6 +43,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
         <DiagnosticsBoot />
         {children}
+        {/* Mounted after {children} (and above every fixed overlay via
+            z-[60]) so it always sits on top of full-screen takeovers like
+            WinnerScreen, not behind them — see BugReportButton.tsx. */}
+        <BugReportButton />
       </body>
     </html>
   );

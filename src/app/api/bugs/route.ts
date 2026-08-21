@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { isAdminAuthorized } from "@/lib/api/admin-auth";
 import { buildBugReportSnapshot, bugReportRequestSchema, loadBugReports, type Reporter } from "@/lib/api/bug-reports";
 import { ApiError, errorResponse } from "@/lib/api/errors";
-import { callRpc, loadGameByRoomCode, loadPlayerByClientToken } from "@/lib/api/game-state";
+import { callRpc, loadGameByRoomCode, loadPlayerByClientToken, type GameRow } from "@/lib/api/game-state";
 import { checkRateLimit } from "@/lib/api/rate-limit";
 import { parseJsonBody, parseRoomCode } from "@/lib/api/validate";
 import { formatBugReportsMarkdown } from "@/lib/bug-report-markdown";
@@ -26,24 +26,33 @@ export async function POST(request: Request) {
   try {
     const body = await parseJsonBody(request, bugReportRequestSchema);
 
-    // Anyone can file a report — a seated player identifies via
-    // clientToken same as every other action, but an invalid/missing token
-    // just falls back to reporting as a spectator rather than rejecting
-    // the whole submission. A bug report failing to submit over an auth
-    // technicality would defeat the point of the button.
-    const roomCode = parseRoomCode(body.roomCode);
-    const game = await loadGameByRoomCode(roomCode);
+    // Anyone can file a report, from anywhere — a page with no active game
+    // (home, /rules) just means roomCode is absent from the body, and the
+    // whole `game` half of the snapshot is omitted. When a room IS given,
+    // a seated player identifies via clientToken same as every other
+    // action, but an invalid/missing token just falls back to reporting
+    // as a spectator rather than rejecting the whole submission. A bug
+    // report failing to submit over an auth technicality would defeat the
+    // point of the button.
+    let roomCode: string | null = null;
+    let game: GameRow | null = null;
+    let reporter: Reporter = { playerId: null, name: "Anonymous", position: null };
 
-    let reporter: Reporter = { playerId: null, name: "Spectator", position: null };
-    if (body.clientToken) {
-      try {
-        const authed = await loadPlayerByClientToken(game.id, body.clientToken);
-        const player = game.state.players.find((p) => p.id === authed.id);
-        if (player) {
-          reporter = { playerId: player.id, name: player.name, position: player.position };
+    if (body.roomCode) {
+      roomCode = parseRoomCode(body.roomCode);
+      game = await loadGameByRoomCode(roomCode);
+      reporter = { playerId: null, name: "Spectator", position: null };
+
+      if (body.clientToken) {
+        try {
+          const authed = await loadPlayerByClientToken(game.id, body.clientToken);
+          const player = game.state.players.find((p) => p.id === authed.id);
+          if (player) {
+            reporter = { playerId: player.id, name: player.name, position: player.position };
+          }
+        } catch {
+          // stays a spectator report
         }
-      } catch {
-        // stays a spectator report
       }
     }
 
@@ -57,7 +66,7 @@ export async function POST(request: Request) {
     const id = randomUUID();
     await callRpc("create_bug_report", {
       p_id: id,
-      p_game_id: game.id,
+      p_game_id: game?.id ?? null,
       p_reporter_player_id: reporter.playerId,
       p_room_code: roomCode,
       p_severity: body.severity,

@@ -24,10 +24,18 @@ function idCtx(id: string) {
   return { params: Promise.resolve({ id }) };
 }
 
-function postJson(url: string, body: unknown): Request {
+// x-forwarded-for defaults to a per-call random value so tests that post
+// without a clientToken (falling back to the IP-keyed rate-limit bucket)
+// don't collide with each other's bucket across the file — only the
+// dedicated rate-limit test deliberately reuses one identity.
+function postJson(url: string, body: unknown, headers: Record<string, string> = {}): Request {
   return new Request(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      "x-forwarded-for": `test-${Math.random().toString(36).slice(2)}`,
+      ...headers,
+    },
     body: JSON.stringify(body),
   });
 }
@@ -50,6 +58,7 @@ const CLIENT_ENV = {
 function bugPayload(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     roomCode: "AAAAAA",
+    path: "/game/AAAAAA",
     description: "the dice sound never stops looping",
     severity: "annoying",
     commitSha: "deadbeef",
@@ -131,13 +140,33 @@ describe("POST /api/bugs", () => {
     expect(res.status).toBe(201);
 
     const row = fakeAdmin.db.bugReports[0];
-    expect(row.snapshot.room.roomCode).toBe(roomCode);
-    expect(row.snapshot.room.mapId).toBe("naija");
-    expect(row.snapshot.turn.turnPhase).toBe("awaiting_roll");
-    expect(row.snapshot.players).toHaveLength(2);
+    expect(row.snapshot.game.room.roomCode).toBe(roomCode);
+    expect(row.snapshot.game.room.mapId).toBe("naija");
+    expect(row.snapshot.game.turn.turnPhase).toBe("awaiting_roll");
+    expect(row.snapshot.game.players).toHaveLength(2);
     expect(row.snapshot.reporter.playerId).toBe(host.playerId);
     expect(row.snapshot.reporter.name).toBe("Ada");
     expect(row.snapshot.client.userAgent).toBe("vitest");
+  });
+
+  it("submits successfully with no roomCode at all — the game field is simply omitted", async () => {
+    const res = await postBug(
+      postJson(
+        "http://test/api/bugs",
+        bugPayload({ roomCode: undefined, path: "/rules", description: "the rules page has a typo" }),
+      ),
+    );
+    expect(res.status).toBe(201);
+
+    const row = fakeAdmin.db.bugReports[0];
+    expect(row.game_id).toBeNull();
+    expect(row.room_code).toBeNull();
+    expect(row.snapshot.game).toBeNull();
+    expect(row.snapshot.path).toBe("/rules");
+    expect(row.snapshot.reporter.playerId).toBeNull();
+    expect(row.snapshot.reporter.name).toBe("Anonymous");
+    expect(row.snapshot.client.userAgent).toBe("vitest");
+    expect(row.description).toBe("the rules page has a typo");
   });
 
   it("rejects the 6th report from the same player within the rate-limit window", async () => {

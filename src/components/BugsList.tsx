@@ -62,10 +62,10 @@ export function BugsList({ reports, secret }: BugsListProps) {
               <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${SEVERITY_CHIP[row.severity]}`}>
                 {SEVERITY_LABEL[row.severity]}
               </span>
-              <span className="text-xs text-muted">room {row.roomCode ?? "—"}</span>
+              <span className="text-xs text-muted">{row.roomCode ? `room ${row.roomCode}` : row.snapshot.path}</span>
               <span className="text-xs text-muted">
                 {row.snapshot.reporter.name}
-                {row.snapshot.reporter.playerId ? "" : " (spectator)"}
+                {row.snapshot.reporter.playerId ? "" : row.snapshot.game ? " (spectator)" : " (no active game)"}
               </span>
               <span className="text-xs text-muted">{row.commitSha ? row.commitSha.slice(0, 7) : "no commit sha"}</span>
               <span className="text-xs text-muted">{new Date(row.createdAt).toLocaleString()}</span>

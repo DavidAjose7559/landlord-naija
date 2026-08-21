@@ -3,11 +3,15 @@
 // GET /api/bugs (concatenates one of these per open report). Deliberately
 // no "server-only" import: the copy button runs client-side.
 
-import type { BugReportRow } from "./bug-report-types";
+import type { BugReportGameSnapshot, BugReportRow } from "./bug-report-types";
 import { SEVERITY_LABEL } from "./bug-report-types";
 
-function reproHint(row: BugReportRow): string {
-  const { turn, reporter } = row.snapshot;
+function reproHint(row: BugReportRow, game: BugReportGameSnapshot | null): string {
+  if (!game) {
+    return `Repro hint: no active game — filed from ${row.snapshot.path}.`;
+  }
+  const { turn } = game;
+  const { reporter } = row.snapshot;
   const whoseTurn = turn.reporterIsCurrentPlayer
     ? "on their own turn"
     : `not their turn (current player: ${turn.currentPlayerName ?? "nobody"})`;
@@ -15,8 +19,8 @@ function reproHint(row: BugReportRow): string {
   return `Repro hint: reporter was ${whoseTurn}, turn_phase="${turn.turnPhase}", standing at ${position} when this was filed.`;
 }
 
-function formatPlayers(row: BugReportRow): string {
-  return row.snapshot.players
+function formatPlayers(game: BugReportGameSnapshot): string {
+  return game.players
     .map((p) => {
       const props = p.properties
         .map((prop) => `${prop.spaceIndex}${prop.hotel ? "(hotel)" : prop.houses > 0 ? `(${prop.houses}h)` : ""}${prop.mortgaged ? "[mortgaged]" : ""}`)
@@ -26,9 +30,9 @@ function formatPlayers(row: BugReportRow): string {
     .join("\n");
 }
 
-function formatEvents(row: BugReportRow): string {
-  if (row.snapshot.lastEvents.length === 0) return "(no events recorded yet)";
-  return row.snapshot.lastEvents.map((e) => `- [${e.seq}] ${e.type} ${JSON.stringify(e.payload)}`).join("\n");
+function formatEvents(game: BugReportGameSnapshot): string {
+  if (game.lastEvents.length === 0) return "(no events recorded yet)";
+  return game.lastEvents.map((e) => `- [${e.seq}] ${e.type} ${JSON.stringify(e.payload)}`).join("\n");
 }
 
 function formatDiagnostics(row: BugReportRow): string {
@@ -38,9 +42,9 @@ function formatDiagnostics(row: BugReportRow): string {
     .join("\n");
 }
 
-function formatTrades(row: BugReportRow): string {
-  if (row.snapshot.openTrades.length === 0) return "(no open trades)";
-  return row.snapshot.openTrades
+function formatTrades(game: BugReportGameSnapshot): string {
+  if (game.openTrades.length === 0) return "(no open trades)";
+  return game.openTrades
     .map((thread) => {
       const rounds = thread.rounds
         .map((r) => `  - round ${r.round} (${r.status}): ${r.fromPlayerId} -> ${r.toPlayerId}`)
@@ -50,28 +54,39 @@ function formatTrades(row: BugReportRow): string {
     .join("\n");
 }
 
+function formatRelevantState(row: BugReportRow, game: BugReportGameSnapshot | null): string {
+  if (!game) {
+    return `(no active game — filed from ${row.snapshot.path})`;
+  }
+  return `- map: ${game.room.mapId}, status: ${game.room.status}
+- turn_phase: ${game.turn.turnPhase}
+- current player: ${game.turn.currentPlayerName ?? "none"} (index ${game.turn.currentPlayerIndex})
+- players:
+${formatPlayers(game)}
+- open trades:
+${formatTrades(game)}`;
+}
+
 export function formatBugReportMarkdown(row: BugReportRow): string {
   const { snapshot } = row;
-  return `## Bug report — ${SEVERITY_LABEL[row.severity]} — room ${snapshot.room.roomCode} — ${row.createdAt}
+  const { game } = snapshot;
+  const location = game ? `room ${game.room.roomCode}` : `no room (${snapshot.path})`;
+  const reporterTag = snapshot.reporter.playerId ? snapshot.reporter.playerId : game ? "spectator" : "no active game";
 
-**Reporter:** ${snapshot.reporter.name}${snapshot.reporter.playerId ? ` (${snapshot.reporter.playerId})` : " (spectator)"}
+  return `## Bug report — ${SEVERITY_LABEL[row.severity]} — ${location} — ${row.createdAt}
+
+**Reporter:** ${snapshot.reporter.name} (${reporterTag})
 **Commit:** ${row.commitSha ?? "unknown"}
-**${reproHint(row)}**
+**${reproHint(row, game)}**
 
 ### What happened
 ${row.description}
 
 ### Relevant state
-- map: ${snapshot.room.mapId}, status: ${snapshot.room.status}
-- turn_phase: ${snapshot.turn.turnPhase}
-- current player: ${snapshot.turn.currentPlayerName ?? "none"} (index ${snapshot.turn.currentPlayerIndex})
-- players:
-${formatPlayers(row)}
-- open trades:
-${formatTrades(row)}
+${formatRelevantState(row, game)}
 
-### Last events (most recent ${snapshot.lastEvents.length})
-${formatEvents(row)}
+### Last events (most recent ${game?.lastEvents.length ?? 0})
+${game ? formatEvents(game) : "(no active game)"}
 
 ### Console/network errors captured this session
 ${formatDiagnostics(row)}

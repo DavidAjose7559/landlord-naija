@@ -70,11 +70,10 @@ export interface SnapshotTradeThread {
   rounds: SnapshotTradeRound[];
 }
 
-// The full jsonb blob stored in bug_reports.snapshot.
-export interface BugReportSnapshot {
-  timestamp: string;
-  commitSha: string | null;
-
+// Everything that only exists when the report was filed from inside an
+// actual game — absent entirely (not zeroed/faked) when filed from a
+// game-less page (home, /rules). See BugReportSnapshot.game below.
+export interface BugReportGameSnapshot {
   room: {
     roomCode: string;
     gameId: string;
@@ -90,18 +89,36 @@ export interface BugReportSnapshot {
     reporterIsCurrentPlayer: boolean;
   };
 
-  reporter: {
-    playerId: string | null;
-    name: string;
-    position: number | null;
-  };
-
   settings: GameSettings;
   players: SnapshotPlayer[];
   state: GameState;
   lastEvents: SnapshotEvent[];
   lastRolls: SnapshotRoll[];
   openTrades: SnapshotTradeThread[];
+}
+
+// The full jsonb blob stored in bug_reports.snapshot.
+export interface BugReportSnapshot {
+  timestamp: string;
+  commitSha: string | null;
+
+  // The route the reporter was actually on (e.g. "/game/ABCDEF",
+  // "/rules", "/") — always present, game or not.
+  path: string;
+
+  // null when filed from a page with no active game (home, /rules, the
+  // /bugs review page itself). Every game-state field lives under here as
+  // one unit so "the snapshot simply omits game fields" is structural,
+  // not a bag of independently-nullable fields callers could forget to
+  // check.
+  game: BugReportGameSnapshot | null;
+
+  reporter: {
+    playerId: string | null;
+    name: string;
+    position: number | null;
+  };
+
   client: ClientEnvSnapshot;
   diagnostics: DiagnosticEntry[];
 }

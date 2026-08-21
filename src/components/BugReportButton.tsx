@@ -1,24 +1,32 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { getDiagnostics } from "@/lib/diagnostics";
 import { SEVERITY_LABEL, type BugSeverity } from "@/lib/bug-report-types";
-import type { PlayerSession } from "@/lib/session";
+import { loadSession } from "@/lib/session";
 import { Modal } from "./Modal";
-
-interface BugReportButtonProps {
-  roomCode: string;
-  session: PlayerSession | null;
-}
 
 const SEVERITIES: BugSeverity[] = ["ruins_game", "annoying", "cosmetic"];
 
-// Persistent, unobtrusive, and always available — deliberately doesn't
-// check whose turn it is, what turnPhase the game is in, or whether
-// `session` even exists. A spectator with no seat can still file a report.
-// Submitting only ever POSTs to /api/bugs, never to the game's own action
-// route, so there is no path from this component to a game-state mutation.
-export function BugReportButton({ roomCode, session }: BugReportButtonProps) {
+// Matches "/game/ABCDEF", "/game/ABCDEF/lobby", "/game/ABCDEF/verify" —
+// anything under a room. Not "/game/ABCDEF/something-else" that isn't a
+// 6-char room code, so a malformed path just falls back to "no room".
+const ROOM_CODE_IN_PATH = /^\/game\/([A-Za-z0-9]{6})(?:\/|$)/;
+
+// Mounted once in the root layout — every route gets it for free, a future
+// page can't forget to add it. Deliberately self-contained (no props):
+// derives roomCode from the current path and loads that room's session
+// from localStorage at submit time (same storage useGame reads), rather
+// than requiring every page to thread roomCode/session down to it.
+//
+// Always available — doesn't check whose turn it is, what turnPhase the
+// game is in, or whether there's even a game on this page at all (home,
+// /rules submit fine with just description/severity/client info). Submit
+// only ever POSTs to /api/bugs, never the game's own action route, so
+// there is no path from this component to a game-state mutation.
+export function BugReportButton() {
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [description, setDescription] = useState("");
   const [severity, setSeverity] = useState<BugSeverity>("annoying");
@@ -32,15 +40,20 @@ export function BugReportButton({ roomCode, session }: BugReportButtonProps) {
     setSubmitting(true);
     setError(null);
     try {
+      const roomCodeMatch = ROOM_CODE_IN_PATH.exec(pathname);
+      const roomCode = roomCodeMatch ? roomCodeMatch[1].toUpperCase() : undefined;
+      const session = roomCode ? loadSession(roomCode) : null;
+
       const res = await fetch("/api/bugs", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           roomCode,
           clientToken: session?.clientToken,
+          path: pathname,
           description: trimmed,
           severity,
-          commitSha: process.env.NEXT_PUBLIC_COMMIT_SHA || null,
+          commitSha: process.env.NEXT_PUBLIC_COMMIT_SHA ?? "local-dev",
           client: {
             userAgent: navigator.userAgent,
             viewportWidth: window.innerWidth,
@@ -77,7 +90,7 @@ export function BugReportButton({ roomCode, session }: BugReportButtonProps) {
         onClick={() => setOpen(true)}
         aria-label="Report a bug"
         title="Report a bug"
-        className="fixed bottom-4 right-4 z-[45] flex h-10 w-10 items-center justify-center rounded-full bg-surface-2/90 text-base shadow-lg backdrop-blur transition-colors hover:bg-surface-2"
+        className="fixed bottom-4 right-4 z-[60] flex h-10 w-10 items-center justify-center rounded-full bg-surface-2/90 text-base shadow-lg backdrop-blur transition-colors hover:bg-surface-2"
       >
         🐛
       </button>
@@ -137,7 +150,7 @@ export function BugReportButton({ roomCode, session }: BugReportButtonProps) {
       )}
 
       {toast && (
-        <div className="fixed bottom-16 right-4 z-[45] rounded-full bg-accent/20 px-4 py-2 text-xs font-medium text-accent shadow-lg">
+        <div className="fixed bottom-16 right-4 z-[60] rounded-full bg-accent/20 px-4 py-2 text-xs font-medium text-accent shadow-lg">
           {toast}
         </div>
       )}

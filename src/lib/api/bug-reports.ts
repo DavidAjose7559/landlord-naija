@@ -3,17 +3,29 @@ import "server-only";
 import { z } from "zod";
 import type { GameRow } from "./game-state";
 import { supabaseAdmin } from "@/lib/supabase/server";
-import type { BugReportRow, BugReportSnapshot, SnapshotEvent, SnapshotRoll, SnapshotTradeThread } from "@/lib/bug-report-types";
+import type {
+  BugReportGameSnapshot,
+  BugReportRow,
+  BugReportSnapshot,
+  SnapshotEvent,
+  SnapshotRoll,
+  SnapshotTradeThread,
+} from "@/lib/bug-report-types";
 import { ApiError } from "./errors";
 
 export const bugSeveritySchema = z.enum(["ruins_game", "annoying", "cosmetic"]);
 
 export const bugReportRequestSchema = z
   .object({
-    roomCode: z.string(),
+    // Absent entirely when filed from a game-less page (home, /rules) —
+    // see route.ts's game-or-null branch.
+    roomCode: z.string().optional(),
     // Optional: present when the reporter has a seat (see loadSession).
     // Absent for a spectator, who can still report — see route.ts.
     clientToken: z.string().min(1).optional(),
+    // The route the reporter was actually on when they clicked the
+    // button — always sent, game or not.
+    path: z.string().min(1).max(300),
     description: z.string().trim().min(1).max(4000),
     severity: bugSeveritySchema,
     commitSha: z.string().max(64).nullable().optional(),
@@ -151,17 +163,7 @@ export interface Reporter {
   position: number | null;
 }
 
-// Assembles the automatic half of the snapshot — everything the SERVER can
-// see and the client can't be trusted to report honestly (game state,
-// event log, roll ledger, open trades). The client half (user agent,
-// viewport, console/network diagnostics) is passed straight through from
-// the request body, since nothing about it can be independently verified
-// server-side — it's diagnostic metadata, not an authorization input.
-export async function buildBugReportSnapshot(
-  game: GameRow,
-  reporter: Reporter,
-  body: BugReportRequest,
-): Promise<BugReportSnapshot> {
+async function buildGameSnapshot(game: GameRow, reporter: Reporter): Promise<BugReportGameSnapshot> {
   const [lastEvents, lastRolls, openTrades] = await Promise.all([
     loadLastEvents(game.id),
     loadLastRolls(game.id),
@@ -171,8 +173,6 @@ export async function buildBugReportSnapshot(
   const currentPlayer = game.state.players[game.state.currentPlayerIndex] ?? null;
 
   return {
-    timestamp: new Date().toISOString(),
-    commitSha: body.commitSha ?? null,
     room: {
       roomCode: game.roomCode,
       gameId: game.id,
@@ -186,7 +186,6 @@ export async function buildBugReportSnapshot(
       currentPlayerName: currentPlayer?.name ?? null,
       reporterIsCurrentPlayer: reporter.playerId !== null && reporter.playerId === currentPlayer?.id,
     },
-    reporter,
     settings: game.state.settings,
     players: game.state.players.map((p) => ({
       id: p.id,
@@ -208,6 +207,29 @@ export async function buildBugReportSnapshot(
     lastEvents,
     lastRolls,
     openTrades,
+  };
+}
+
+// Assembles the automatic half of the snapshot — everything the SERVER can
+// see and the client can't be trusted to report honestly (game state,
+// event log, roll ledger, open trades). The client half (user agent,
+// viewport, console/network diagnostics) is passed straight through from
+// the request body, since nothing about it can be independently verified
+// server-side — it's diagnostic metadata, not an authorization input.
+// `game` is null when the report was filed from a page with no active
+// game (home, /rules) — the whole `game` field is then omitted as a unit
+// rather than populated with faked/zeroed values.
+export async function buildBugReportSnapshot(
+  game: GameRow | null,
+  reporter: Reporter,
+  body: BugReportRequest,
+): Promise<BugReportSnapshot> {
+  return {
+    timestamp: new Date().toISOString(),
+    commitSha: body.commitSha ?? null,
+    path: body.path,
+    game: game ? await buildGameSnapshot(game, reporter) : null,
+    reporter,
     client: body.client,
     diagnostics: body.diagnostics,
   };
