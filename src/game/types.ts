@@ -19,13 +19,12 @@ export type PlayerToken =
   | "bottle";
 
 // The default is "awaiting_roll" (matches the games.turn_phase DB default).
-// This list will grow as the game engine is built out.
 export type TurnPhase =
-  | "awaiting_roll"
-  | "awaiting_purchase"
-  | "awaiting_card"
-  | "in_jail"
-  | "awaiting_payment"
+  | "awaiting_roll" // must ROLL (or PAY_JAIL_FINE/USE_JAIL_FREE if in jail)
+  | "awaiting_purchase" // landed on an unowned space; BUY or DECLINE_BUY
+  | "awaiting_payment" // owes rent/tax/a card's pay effect; see pendingDebt
+  | "awaiting_card" // landed on a card space; waiting for a DRAW_CARD action
+  | "awaiting_end_turn" // move fully resolved; may build/trade/mortgage, then END_TURN
   | "game_over";
 
 // Deliberately excludes client_token: that secret lives only on the
@@ -53,11 +52,28 @@ export interface PropertyOwnership {
   mortgaged: boolean;
 }
 
-// A card has been drawn and is awaiting resolution (e.g. a nearestTransport
-// card needs the player to buy or pay rent on the space it moved them to).
-export interface PendingCard {
-  deck: Deck;
-  cardId: string;
+// A debt the current player owes (rent to another player, tax or a card's
+// pay effect to the bank) that they didn't have enough cash to cover the
+// instant it was incurred. Cleared by PAY_RENT once they can afford it
+// (having raised cash via MORTGAGE/SELL_HOUSE), or by DECLARE_BANKRUPT.
+export interface PendingDebt {
+  amount: number;
+  creditorId: string | "bank";
+  reason: "rent" | "tax" | "card";
+}
+
+export interface TradeOffer {
+  cashCents: number;
+  spaceIndexes: number[];
+  jailFreeCards: number;
+}
+
+export interface TradeProposal {
+  id: number;
+  fromPlayerId: string;
+  toPlayerId: string;
+  give: TradeOffer; // what fromPlayerId offers
+  receive: TradeOffer; // what fromPlayerId wants from toPlayerId
 }
 
 export interface GameState {
@@ -68,6 +84,20 @@ export interface GameState {
   doublesCount: number;
   players: PlayerState[];
   ownership: Record<number, PropertyOwnership>;
-  pendingCard: PendingCard | null;
   winnerPlayerId: string | null;
+
+  // The dice from the most recent ROLL action. Utility rent uses these
+  // ("the actual dice that landed you there") even when resolved a step
+  // later, e.g. from inside a card effect.
+  lastRoll: { d1: number; d2: number } | null;
+
+  // Set when the current player has landed on a card space; the caller
+  // (which owns deck/shuffle state, outside this pure engine) draws from
+  // this deck and dispatches DRAW_CARD with the result.
+  pendingCardDeck: Deck | null;
+
+  pendingDebt: PendingDebt | null;
+
+  trades: TradeProposal[];
+  nextTradeId: number;
 }
