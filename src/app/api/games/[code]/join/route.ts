@@ -22,7 +22,10 @@ export async function POST(request: Request, context: { params: Promise<{ code: 
 
     const game = await loadGameByRoomCode(roomCode);
     if (game.status !== "lobby") {
-      throw new ApiError(409, "game has already started");
+      // The client is expected to treat this as "watch instead" and route
+      // to the board as a spectator (no session), not surface it as a
+      // hard failure — see the board page's spectating banner.
+      throw new ApiError(409, "game has already started — you can watch from the board instead");
     }
     if (game.state.players.length >= MAX_PLAYERS) {
       throw new ApiError(409, "game is full");

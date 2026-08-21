@@ -11,7 +11,7 @@ export default function LobbyPage() {
   const { code } = useParams<{ code: string }>();
   const roomCode = code.toUpperCase();
   const router = useRouter();
-  const { game, loading, error, session, setSession } = useGame(roomCode);
+  const { game, loading, error, session, reconnecting, setSession } = useGame(roomCode);
 
   const [name, setName] = useState("");
   const [token, setToken] = useState<PlayerToken | null>(null);
@@ -83,7 +83,10 @@ export default function LobbyPage() {
     return <CenteredMessage>{error}</CenteredMessage>;
   }
 
-  if (!game) return null;
+  // Once the game has actually started, this page is just a brief stop on
+  // the way to the board (see the redirect effect above) — never flash the
+  // stale join form for a game that's no longer accepting new players.
+  if (!game || game.status !== "lobby") return null;
 
   const takenTokens = new Set(game.state.players.map((p) => p.token));
   const isHost = session?.playerId === game.state.players[0]?.id;
@@ -91,6 +94,13 @@ export default function LobbyPage() {
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-2xl flex-col items-center gap-10 bg-canvas px-6 py-16">
+      {reconnecting && (
+        <div className="flex items-center gap-2 self-stretch rounded-2xl bg-surface-2 px-4 py-2.5 text-center text-xs text-ink">
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+          Reconnecting…
+        </div>
+      )}
+
       <div className="flex flex-col items-center gap-3">
         <button
           type="button"

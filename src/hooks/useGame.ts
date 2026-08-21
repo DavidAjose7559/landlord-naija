@@ -17,6 +17,7 @@ export interface UseGameResult {
   loading: boolean;
   error: string | null;
   pending: boolean;
+  reconnecting: boolean;
   session: PlayerSession | null;
   setSession: (session: PlayerSession) => void;
   dispatch: (action: ClientAction) => Promise<ActionResult | null>;
@@ -49,6 +50,7 @@ export function useGame(roomCode: string): UseGameResult {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
   const [session, setSessionState] = useState<PlayerSession | null>(null);
 
   const sessionRef = useRef<PlayerSession | null>(null);
@@ -121,7 +123,10 @@ export function useGame(roomCode: string): UseGameResult {
         )
         .subscribe((status) => {
           if (cancelled) return;
-          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+          if (status === "SUBSCRIBED") {
+            setReconnecting(false);
+          } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+            setReconnecting(true);
             if (reconnectTimer) clearTimeout(reconnectTimer);
             reconnectTimer = setTimeout(() => {
               if (cancelled) return;
@@ -135,6 +140,7 @@ export function useGame(roomCode: string): UseGameResult {
 
     async function bootstrap() {
       setLoading(true);
+      setReconnecting(false);
       const data = await refetchNow();
       if (cancelled) return;
       setLoading(false);
@@ -204,5 +210,5 @@ export function useGame(roomCode: string): UseGameResult {
     [roomCode],
   );
 
-  return { game, loading, error, pending, session, setSession, dispatch, refetch };
+  return { game, loading, error, pending, reconnecting, session, setSession, dispatch, refetch };
 }

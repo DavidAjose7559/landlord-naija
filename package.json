@@ -1,6 +1,7 @@
 {
   "name": "landlord-naija",
   "version": "0.1.0",
+  "description": "A provably-fair, Naija-flavoured Monopoly you play with friends over a room code.",
   "private": true,
   "scripts": {
     "dev": "next dev",

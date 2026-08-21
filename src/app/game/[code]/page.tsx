@@ -15,7 +15,7 @@ export default function BoardPage() {
   const { code } = useParams<{ code: string }>();
   const roomCode = code.toUpperCase();
   const router = useRouter();
-  const { game, loading, error, session, pending, dispatch } = useGame(roomCode);
+  const { game, loading, error, session, pending, reconnecting, dispatch } = useGame(roomCode);
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [muted, setMuted] = useState(true);
@@ -54,6 +54,19 @@ export default function BoardPage() {
           </Link>
         </div>
       </div>
+
+      {reconnecting && (
+        <div className="flex items-center justify-center gap-2 rounded-2xl bg-surface-2 px-4 py-2.5 text-center text-xs text-ink">
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+          Reconnecting…
+        </div>
+      )}
+
+      {!session && (
+        <div className="rounded-2xl bg-surface-2 px-4 py-2.5 text-center text-xs text-muted">
+          You&apos;re spectating — this game already started before you joined.
+        </div>
+      )}
 
       {game.status === "finished" && (
         <div className="rounded-2xl bg-surface px-5 py-4 text-center">

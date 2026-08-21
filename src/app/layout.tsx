@@ -12,9 +12,21 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// Needed so the opengraph-image below resolves to an absolute URL —
+// without it, share previews (WhatsApp, etc.) can silently fail to load
+// the image. VERCEL_URL is populated automatically by Vercel; no extra
+// env var to configure.
+const siteUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
   title: "LANDLORD — Naija Edition",
   description: "Buy Lagos. Own Naija.",
+  openGraph: {
+    title: "LANDLORD — Naija Edition",
+    description: "Buy Lagos. Own Naija.",
+    type: "website",
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

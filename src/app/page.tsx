@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -96,6 +97,10 @@ export default function Home() {
       )}
 
       {error && <p className="text-sm text-danger">{error}</p>}
+
+      <Link href="/rules" className="text-sm font-medium text-muted hover:text-ink">
+        How to play →
+      </Link>
     </div>
   );
 }
