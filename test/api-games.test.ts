@@ -19,6 +19,11 @@ import { POST as leaveLobby } from "@/app/api/games/[code]/leave/route";
 import { PATCH as patchSettings } from "@/app/api/games/[code]/settings/route";
 import { POST as startGame } from "@/app/api/games/[code]/start/route";
 import { POST as postAction } from "@/app/api/games/[code]/action/route";
+import { POST as proposeTrade } from "@/app/api/games/[code]/trades/route";
+import { POST as acceptTrade } from "@/app/api/games/[code]/trades/[tradeId]/accept/route";
+import { POST as counterTrade } from "@/app/api/games/[code]/trades/[tradeId]/counter/route";
+import { POST as declineTrade } from "@/app/api/games/[code]/trades/[tradeId]/decline/route";
+import { POST as cancelTrade } from "@/app/api/games/[code]/trades/[tradeId]/cancel/route";
 import { GET as getVerify } from "@/app/api/games/[code]/verify/route";
 import { GET as getPublicGames } from "@/app/api/games/public/route";
 
@@ -26,6 +31,10 @@ const fakeAdmin = supabaseAdmin as unknown as FakeSupabaseAdmin;
 
 function ctx(code: string) {
   return { params: Promise.resolve({ code }) };
+}
+
+function tradeCtx(code: string, tradeId: string) {
+  return { params: Promise.resolve({ code, tradeId }) };
 }
 
 function postJson(url: string, body: unknown): Request {
@@ -508,5 +517,233 @@ describe("GET /api/games/[code]/verify", () => {
 
     expect(body.verification.ok).toBe(false);
     expect(body.verification.diceMismatches).toEqual([0]);
+  });
+});
+
+describe("trades", () => {
+  async function setupWithOwnership() {
+    const setup = await createJoinAndStart();
+    const game = fakeAdmin.db.games.find((g) => g.room_code === setup.roomCode)!;
+    game.state.ownership = { 1: { ownerId: setup.host.playerId, houses: 0, hotel: false, mortgaged: false } };
+    return setup;
+  }
+
+  const EMPTY = { cashCents: 0, spaceIndexes: [], jailFreeCards: 0 };
+
+  it("proposes a trade", async () => {
+    const setup = await setupWithOwnership();
+    const res = await proposeTrade(
+      postJson(`http://test/api/games/${setup.roomCode}/trades`, {
+        clientToken: setup.host.clientToken,
+        toPlayerId: setup.guest.playerId,
+        offer: { ...EMPTY, spaceIndexes: [1] },
+        request: { ...EMPTY, cashCents: 1_000 },
+      }),
+      ctx(setup.roomCode),
+    );
+    expect(res.status).toBe(201);
+    expect(fakeAdmin.db.trades).toHaveLength(1);
+    expect(fakeAdmin.db.trades[0].status).toBe("open");
+  });
+
+  it("rejects a second open trade between the same pair", async () => {
+    const setup = await setupWithOwnership();
+    const propose = () =>
+      proposeTrade(
+        postJson(`http://test/api/games/${setup.roomCode}/trades`, {
+          clientToken: setup.host.clientToken,
+          toPlayerId: setup.guest.playerId,
+          offer: EMPTY,
+          request: EMPTY,
+        }),
+        ctx(setup.roomCode),
+      );
+    const first = await propose();
+    expect(first.status).toBe(201);
+    const second = await propose();
+    expect(second.status).not.toBe(201);
+  });
+
+  it("accepting moves cash/ownership for real and marks the row accepted", async () => {
+    const setup = await setupWithOwnership();
+    const proposeRes = await proposeTrade(
+      postJson(`http://test/api/games/${setup.roomCode}/trades`, {
+        clientToken: setup.host.clientToken,
+        toPlayerId: setup.guest.playerId,
+        offer: { ...EMPTY, spaceIndexes: [1] },
+        request: { ...EMPTY, cashCents: 1_000 },
+      }),
+      ctx(setup.roomCode),
+    );
+    const { tradeId } = await proposeRes.json();
+
+    const res = await acceptTrade(
+      postJson(`http://test/api/games/${setup.roomCode}/trades/${tradeId}/accept`, { clientToken: setup.guest.clientToken }),
+      tradeCtx(setup.roomCode, tradeId),
+    );
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.state.ownership["1"].ownerId).toBe(setup.guest.playerId);
+    expect(fakeAdmin.db.trades.find((t: { id: string }) => t.id === tradeId).status).toBe("accepted");
+  });
+
+  it("rejects accept from anyone other than the recipient", async () => {
+    const setup = await setupWithOwnership();
+    const proposeRes = await proposeTrade(
+      postJson(`http://test/api/games/${setup.roomCode}/trades`, {
+        clientToken: setup.host.clientToken,
+        toPlayerId: setup.guest.playerId,
+        offer: EMPTY,
+        request: EMPTY,
+      }),
+      ctx(setup.roomCode),
+    );
+    const { tradeId } = await proposeRes.json();
+
+    const res = await acceptTrade(
+      postJson(`http://test/api/games/${setup.roomCode}/trades/${tradeId}/accept`, { clientToken: setup.host.clientToken }),
+      tradeCtx(setup.roomCode, tradeId),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("accepting a trade the board has changed under returns ok:false rather than executing it", async () => {
+    const setup = await setupWithOwnership();
+    const proposeRes = await proposeTrade(
+      postJson(`http://test/api/games/${setup.roomCode}/trades`, {
+        clientToken: setup.host.clientToken,
+        toPlayerId: setup.guest.playerId,
+        offer: { ...EMPTY, spaceIndexes: [1] },
+        request: EMPTY,
+      }),
+      ctx(setup.roomCode),
+    );
+    const { tradeId } = await proposeRes.json();
+
+    // The board changes after the offer was made — space 1 no longer belongs to the host.
+    const game = fakeAdmin.db.games.find((g) => g.room_code === setup.roomCode)!;
+    game.state.ownership = {};
+
+    const res = await acceptTrade(
+      postJson(`http://test/api/games/${setup.roomCode}/trades/${tradeId}/accept`, { clientToken: setup.guest.clientToken }),
+      tradeCtx(setup.roomCode, tradeId),
+    );
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.reason).toMatch(/board has changed/i);
+  });
+
+  it("counter swaps roles, increments the round, and supersedes the parent", async () => {
+    const setup = await setupWithOwnership();
+    const proposeRes = await proposeTrade(
+      postJson(`http://test/api/games/${setup.roomCode}/trades`, {
+        clientToken: setup.host.clientToken,
+        toPlayerId: setup.guest.playerId,
+        offer: { ...EMPTY, spaceIndexes: [1] },
+        request: { ...EMPTY, cashCents: 1_000 },
+      }),
+      ctx(setup.roomCode),
+    );
+    const { tradeId } = await proposeRes.json();
+
+    const counterRes = await counterTrade(
+      postJson(`http://test/api/games/${setup.roomCode}/trades/${tradeId}/counter`, {
+        clientToken: setup.guest.clientToken,
+        offer: { ...EMPTY, cashCents: 500 },
+        request: { ...EMPTY, spaceIndexes: [1] },
+      }),
+      tradeCtx(setup.roomCode, tradeId),
+    );
+    expect(counterRes.status).toBe(201);
+    const { tradeId: counterId, round } = await counterRes.json();
+    expect(round).toBe(2);
+
+    const parent = fakeAdmin.db.trades.find((t: { id: string }) => t.id === tradeId);
+    const child = fakeAdmin.db.trades.find((t: { id: string }) => t.id === counterId);
+    expect(parent.status).toBe("superseded");
+    expect(child.status).toBe("open");
+    expect(child.from_player_id).toBe(setup.guest.playerId);
+    expect(child.to_player_id).toBe(setup.host.playerId);
+  });
+
+  it("declines an open trade", async () => {
+    const setup = await setupWithOwnership();
+    const proposeRes = await proposeTrade(
+      postJson(`http://test/api/games/${setup.roomCode}/trades`, {
+        clientToken: setup.host.clientToken,
+        toPlayerId: setup.guest.playerId,
+        offer: EMPTY,
+        request: EMPTY,
+      }),
+      ctx(setup.roomCode),
+    );
+    const { tradeId } = await proposeRes.json();
+    const res = await declineTrade(
+      postJson(`http://test/api/games/${setup.roomCode}/trades/${tradeId}/decline`, { clientToken: setup.guest.clientToken }),
+      tradeCtx(setup.roomCode, tradeId),
+    );
+    expect(res.status).toBe(200);
+    expect(fakeAdmin.db.trades.find((t: { id: string }) => t.id === tradeId).status).toBe("declined");
+  });
+
+  it("the proposer can cancel their own open trade", async () => {
+    const setup = await setupWithOwnership();
+    const proposeRes = await proposeTrade(
+      postJson(`http://test/api/games/${setup.roomCode}/trades`, {
+        clientToken: setup.host.clientToken,
+        toPlayerId: setup.guest.playerId,
+        offer: EMPTY,
+        request: EMPTY,
+      }),
+      ctx(setup.roomCode),
+    );
+    const { tradeId } = await proposeRes.json();
+    const res = await cancelTrade(
+      postJson(`http://test/api/games/${setup.roomCode}/trades/${tradeId}/cancel`, { clientToken: setup.host.clientToken }),
+      tradeCtx(setup.roomCode, tradeId),
+    );
+    expect(res.status).toBe(200);
+    expect(fakeAdmin.db.trades.find((t: { id: string }) => t.id === tradeId).status).toBe("cancelled");
+  });
+
+  it("caps a negotiation at 10 rounds", async () => {
+    const setup = await setupWithOwnership();
+    const proposeRes = await proposeTrade(
+      postJson(`http://test/api/games/${setup.roomCode}/trades`, {
+        clientToken: setup.host.clientToken,
+        toPlayerId: setup.guest.playerId,
+        offer: EMPTY,
+        request: EMPTY,
+      }),
+      ctx(setup.roomCode),
+    );
+    let { tradeId: currentId } = await proposeRes.json();
+    const clientTokens = [setup.guest.clientToken, setup.host.clientToken];
+
+    // Round 1 already exists; rounds 2-10 are 9 more counters.
+    for (let round = 2; round <= 10; round++) {
+      const res = await counterTrade(
+        postJson(`http://test/api/games/${setup.roomCode}/trades/${currentId}/counter`, {
+          clientToken: clientTokens[round % 2],
+          offer: EMPTY,
+          request: EMPTY,
+        }),
+        tradeCtx(setup.roomCode, currentId),
+      );
+      expect(res.status).toBe(201);
+      currentId = (await res.json()).tradeId;
+    }
+
+    const overCap = await counterTrade(
+      postJson(`http://test/api/games/${setup.roomCode}/trades/${currentId}/counter`, {
+        clientToken: clientTokens[11 % 2],
+        offer: EMPTY,
+        request: EMPTY,
+      }),
+      tradeCtx(setup.roomCode, currentId),
+    );
+    expect(overCap.status).toBe(409);
+    const overCapBody = await overCap.json();
+    expect(overCapBody.error).toMatch(/gone on long enough/i);
   });
 });

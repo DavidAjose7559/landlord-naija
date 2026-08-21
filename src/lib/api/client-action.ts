@@ -10,9 +10,13 @@
 
 import { z } from "zod";
 
-const spaceIndexSchema = z.number().int().min(0).max(39);
+export const spaceIndexSchema = z.number().int().min(0).max(39);
 
-const tradeOfferSchema = z
+// Shared with the trades routes (propose/counter) — trade negotiation
+// itself lives outside GameAction entirely now (see engine.ts's
+// EXECUTE_ACCEPTED_TRADE comment), but the offer shape is the same either
+// way.
+export const tradeOfferSchema = z
   .object({
     cashCents: z.number().int().nonnegative(),
     spaceIndexes: z.array(spaceIndexSchema),
@@ -39,16 +43,6 @@ export const clientActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("END_TURN") }).strict(),
   z.object({ type: z.literal("FORCE_END_TURN") }).strict(),
   z.object({ type: z.literal("DECLARE_BANKRUPT") }).strict(),
-  z
-    .object({
-      type: z.literal("PROPOSE_TRADE"),
-      toPlayerId: z.string().uuid(),
-      give: tradeOfferSchema,
-      receive: tradeOfferSchema,
-    })
-    .strict(),
-  z.object({ type: z.literal("ACCEPT_TRADE"), tradeId: z.number().int() }).strict(),
-  z.object({ type: z.literal("DECLINE_TRADE"), tradeId: z.number().int() }).strict(),
 ]);
 
 export type ClientAction = z.infer<typeof clientActionSchema>;

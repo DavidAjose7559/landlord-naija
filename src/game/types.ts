@@ -112,14 +112,6 @@ export interface TradeOffer {
   jailFreeCards: number;
 }
 
-export interface TradeProposal {
-  id: number;
-  fromPlayerId: string;
-  toPlayerId: string;
-  give: TradeOffer; // what fromPlayerId offers
-  receive: TradeOffer; // what fromPlayerId wants from toPlayerId
-}
-
 // (settings.auctionOnDecline) A property nobody bought outright goes up
 // for auction among every non-bankrupt player instead of staying with the
 // bank. eligiblePlayerIds shrinks as players PASS_AUCTION; the last one
@@ -173,7 +165,4 @@ export interface GameState {
   // stay pure) whenever currentPlayerIndex changes. Used to authorize a
   // TIMEOUT_END_TURN action server-side, never trusting client-reported time.
   turnStartedAt: number | null;
-
-  trades: TradeProposal[];
-  nextTradeId: number;
 }

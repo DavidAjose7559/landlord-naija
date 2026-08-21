@@ -44,8 +44,6 @@ function makeState(players: PlayerState[], overrides: Partial<GameState> = {}): 
     pendingAuction: null,
     freeParkingPot: 0,
     turnStartedAt: null,
-    trades: [],
-    nextTradeId: 1,
     ...overrides,
   };
 }
@@ -584,22 +582,23 @@ describe("settings", () => {
     expect(off.events.some((e) => e.type === "PROPERTIES_RETURNED_TO_MARKET")).toBe(true);
   });
 
-  it("tradingEnabled: PROPOSE_TRADE creates a trade when ON, is a no-op when OFF", () => {
-    function tradeCount(tradingEnabled: boolean): number {
+  it("tradingEnabled: EXECUTE_ACCEPTED_TRADE moves cash when ON, is a no-op when OFF", () => {
+    function receiverCashAfterTrade(tradingEnabled: boolean): number {
       const state = makeState([makePlayer("p1", 0, { cashCents: 10_000 }), makePlayer("p2", 1, { cashCents: 10_000 })], {
         settings: { ...DEFAULT_SETTINGS, tradingEnabled },
       });
       const { state: next } = reduce(state, {
-        type: "PROPOSE_TRADE",
+        type: "EXECUTE_ACCEPTED_TRADE",
+        playerId: "p2",
         fromPlayerId: "p1",
         toPlayerId: "p2",
         give: { cashCents: 1_000, spaceIndexes: [], jailFreeCards: 0 },
         receive: { cashCents: 0, spaceIndexes: [], jailFreeCards: 0 },
       });
-      return next.trades.length;
+      return next.players[1].cashCents;
     }
-    expect(tradeCount(true)).toBe(1);
-    expect(tradeCount(false)).toBe(0);
+    expect(receiverCashAfterTrade(true)).toBe(11_000);
+    expect(receiverCashAfterTrade(false)).toBe(10_000);
   });
 
   describe("UPDATE_SETTINGS", () => {
@@ -763,5 +762,90 @@ describe("debt relief", () => {
     });
     const { state: next } = reduce(state, { type: "DECLARE_BANKRUPT", playerId: "p1" });
     expect(next.players[0].bankrupt).toBe(true);
+  });
+});
+
+// Section D: trade negotiation (propose/counter/decline/cancel) lives in
+// the `trades` table now, outside the pure engine — see
+// src/app/api/games/[code]/trades/** and test/api-games.test.ts for that.
+// Only EXECUTE_ACCEPTED_TRADE remains here, since accepting is the one
+// moment that actually has to mutate cash/ownership.
+describe("EXECUTE_ACCEPTED_TRADE", () => {
+  function tradeState(overrides: Partial<GameState> = {}) {
+    return makeState(
+      [
+        makePlayer("p1", 0, { cashCents: 10_000 }),
+        makePlayer("p2", 1, { cashCents: 10_000 }),
+      ],
+      {
+        ownership: { 1: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false } },
+        ...overrides,
+      },
+    );
+  }
+
+  it("moves cash, properties, and jail-free cards both ways", () => {
+    const state = tradeState({
+      players: [
+        makePlayer("p1", 0, { cashCents: 10_000, jailFreeCards: 1 }),
+        makePlayer("p2", 1, { cashCents: 10_000 }),
+      ],
+    });
+    const { state: next } = reduce(state, {
+      type: "EXECUTE_ACCEPTED_TRADE",
+      playerId: "p2",
+      fromPlayerId: "p1",
+      toPlayerId: "p2",
+      give: { cashCents: 0, spaceIndexes: [1], jailFreeCards: 1 },
+      receive: { cashCents: 5_000, spaceIndexes: [], jailFreeCards: 0 },
+    });
+    expect(next.ownership[1].ownerId).toBe("p2");
+    expect(next.players[0].cashCents).toBe(15_000); // p1 received the 5,000
+    expect(next.players[1].cashCents).toBe(5_000); // p2 paid the 5,000
+    expect(next.players[0].jailFreeCards).toBe(0);
+    expect(next.players[1].jailFreeCards).toBe(1);
+  });
+
+  it("only the recipient (toPlayerId) can execute the trade", () => {
+    const state = tradeState();
+    const { events } = reduce(state, {
+      type: "EXECUTE_ACCEPTED_TRADE",
+      playerId: "p1", // the proposer, not the recipient
+      fromPlayerId: "p1",
+      toPlayerId: "p2",
+      give: { cashCents: 0, spaceIndexes: [1], jailFreeCards: 0 },
+      receive: { cashCents: 0, spaceIndexes: [], jailFreeCards: 0 },
+    });
+    expect(events).toHaveLength(0);
+  });
+
+  it("rejects a stale offer — the property isn't owned by fromPlayerId anymore", () => {
+    const state = tradeState({ ownership: {} }); // space 1 no longer owned by p1
+    const { events } = reduce(state, {
+      type: "EXECUTE_ACCEPTED_TRADE",
+      playerId: "p2",
+      fromPlayerId: "p1",
+      toPlayerId: "p2",
+      give: { cashCents: 0, spaceIndexes: [1], jailFreeCards: 0 },
+      receive: { cashCents: 0, spaceIndexes: [], jailFreeCards: 0 },
+    });
+    expect(events).toHaveLength(0);
+  });
+
+  it("rejects a trade involving a player who's mid-debt-resolution", () => {
+    const state = tradeState({
+      turnPhase: "awaiting_payment",
+      pendingDebt: { amount: 1_000, creditorId: "bank", reason: "tax" },
+      currentPlayerIndex: 0, // p1 is the debtor
+    });
+    const { events } = reduce(state, {
+      type: "EXECUTE_ACCEPTED_TRADE",
+      playerId: "p2",
+      fromPlayerId: "p1",
+      toPlayerId: "p2",
+      give: { cashCents: 1_000, spaceIndexes: [], jailFreeCards: 0 },
+      receive: { cashCents: 0, spaceIndexes: [], jailFreeCards: 0 },
+    });
+    expect(events).toHaveLength(0);
   });
 });

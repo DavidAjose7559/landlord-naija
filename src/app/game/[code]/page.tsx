@@ -83,7 +83,7 @@ export default function BoardPage() {
         <>
           <DiceRoller game={game} isMyTurn={isMyTurn} dispatch={dispatch} muted={muted} />
           <ActionBar game={game} session={session} dispatch={dispatch} />
-          {session && <TradePanel game={game} session={session} dispatch={dispatch} />}
+          {session && <TradePanel game={game} session={session} />}
         </>
       )}
 

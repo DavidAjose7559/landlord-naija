@@ -4,11 +4,46 @@ import type { Deck } from "@/game/board";
 import { shuffleDeck } from "@/game/cards";
 import { MAPS } from "@/game/maps";
 import type { MapId } from "@/game/maps/types";
-import type { GameState, GameStatus, PlayerState, TurnPhase } from "@/game/types";
+import type { GameState, GameStatus, PlayerState, TradeOffer, TurnPhase } from "@/game/types";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import type { PublicGame } from "./public-game";
 import { ApiError } from "./errors";
 import { secureRandom } from "./rng";
+
+export interface TradeRow {
+  id: string;
+  gameId: string;
+  status: "open" | "accepted" | "declined" | "cancelled" | "superseded";
+  fromPlayerId: string;
+  toPlayerId: string;
+  offer: TradeOffer;
+  request: TradeOffer;
+  parentTradeId: string | null;
+  round: number;
+}
+
+export async function loadTrade(gameId: string, tradeId: string): Promise<TradeRow> {
+  const { data, error } = await supabaseAdmin
+    .from("trades")
+    .select("*")
+    .eq("id", tradeId)
+    .eq("game_id", gameId)
+    .maybeSingle();
+  if (error) throw new ApiError(500, "failed to load trade");
+  if (!data) throw new ApiError(404, "trade not found");
+  const row = data as Record<string, unknown>;
+  return {
+    id: row.id as string,
+    gameId: row.game_id as string,
+    status: row.status as TradeRow["status"],
+    fromPlayerId: row.from_player_id as string,
+    toPlayerId: row.to_player_id as string,
+    offer: row.offer as TradeOffer,
+    request: row.request as TradeOffer,
+    parentTradeId: (row.parent_trade_id as string | null) ?? null,
+    round: row.round as number,
+  };
+}
 
 export interface GameRow {
   id: string;

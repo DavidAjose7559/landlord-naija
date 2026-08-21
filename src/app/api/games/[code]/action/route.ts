@@ -20,21 +20,14 @@ import { checkRateLimit } from "@/lib/api/rate-limit";
 import { parseJsonBody, parseRoomCode } from "@/lib/api/validate";
 import { supabaseAdmin } from "@/lib/supabase/server";
 
-// Trade actions are inherently between two players and aren't turn-locked
-// by design (see engine.ts); neither is DECLARE_BANKRUPT — a player can
-// bail out even when it isn't their turn. Auction bids/passes are gated by
-// pendingAuction.turnPlayerId instead of currentPlayerIndex (engine.ts
-// enforces that itself); FORCE_END_TURN can be triggered by any player
-// once the clock has actually run out, not just the stuck player.
-const TURN_EXEMPT_ACTIONS = new Set([
-  "PROPOSE_TRADE",
-  "ACCEPT_TRADE",
-  "DECLINE_TRADE",
-  "DECLARE_BANKRUPT",
-  "PLACE_BID",
-  "PASS_AUCTION",
-  "FORCE_END_TURN",
-]);
+// DECLARE_BANKRUPT is exempt — a player can bail out even when it isn't
+// their turn. Auction bids/passes are gated by pendingAuction.turnPlayerId
+// instead of currentPlayerIndex (engine.ts enforces that itself);
+// FORCE_END_TURN can be triggered by any player once the clock has
+// actually run out, not just the stuck player. Trade proposing/countering/
+// accepting/declining doesn't go through this route at all anymore — see
+// src/app/api/games/[code]/trades/**.
+const TURN_EXEMPT_ACTIONS = new Set(["DECLARE_BANKRUPT", "PLACE_BID", "PASS_AUCTION", "FORCE_END_TURN"]);
 
 const RATE_LIMIT = 20;
 const RATE_WINDOW_MS = 10_000;
@@ -97,27 +90,6 @@ async function resolveConcreteAction(
         deckStatePayload: newDeckState,
       };
     }
-
-    case "PROPOSE_TRADE":
-      return {
-        action: {
-          type: "PROPOSE_TRADE",
-          fromPlayerId: player.id,
-          toPlayerId: action.toPlayerId,
-          give: action.give,
-          receive: action.receive,
-        },
-        rollPayload: null,
-        deckStatePayload: null,
-      };
-
-    case "ACCEPT_TRADE":
-    case "DECLINE_TRADE":
-      return {
-        action: { type: action.type, playerId: player.id, tradeId: action.tradeId },
-        rollPayload: null,
-        deckStatePayload: null,
-      };
 
     case "BUILD_HOUSE":
     case "SELL_HOUSE":

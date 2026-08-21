@@ -73,10 +73,11 @@ export interface FakeDb {
   playerSecrets: any[];
   rolls: any[];
   events: any[];
+  trades: any[];
 }
 
 function emptyDb(): FakeDb {
-  return { games: [], gameSecrets: [], players: [], playerSecrets: [], rolls: [], events: [] };
+  return { games: [], gameSecrets: [], players: [], playerSecrets: [], rolls: [], events: [], trades: [] };
 }
 
 export class FakeSupabaseAdmin {
@@ -115,6 +116,7 @@ export class FakeSupabaseAdmin {
       player_secrets: this.db.playerSecrets,
       rolls: this.db.rolls,
       events: this.db.events,
+      trades: this.db.trades,
     };
     const rows = tableMap[table];
     if (!rows) throw new Error(`fake supabase: unknown table "${table}"`);
@@ -136,6 +138,12 @@ export class FakeSupabaseAdmin {
           return this.updateSettings(args);
         case "leave_lobby":
           return this.leaveLobby(args);
+        case "propose_trade":
+          return this.proposeTrade(args);
+        case "counter_trade":
+          return this.counterTrade(args);
+        case "respond_trade":
+          return this.respondTrade(args);
         default:
           return { data: null, error: { message: `unknown rpc ${fn}` } };
       }
@@ -240,6 +248,11 @@ export class FakeSupabaseAdmin {
       if (secrets) secrets.deck_state = args.p_deck_state;
     }
 
+    if (args.p_accepted_trade_id) {
+      const trade = this.db.trades.find((t) => t.id === args.p_accepted_trade_id && t.game_id === args.p_game_id);
+      if (trade) trade.status = "accepted";
+    }
+
     let seq = Math.max(0, ...this.db.events.filter((e) => e.game_id === args.p_game_id).map((e) => e.seq), 0);
     for (const event of args.p_events as any[]) {
       seq += 1;
@@ -264,6 +277,63 @@ export class FakeSupabaseAdmin {
     if (!game) return { data: null, error: null };
     game.state = args.p_new_state;
     game.updated_at = new Date().toISOString();
+    return { data: null, error: null };
+  }
+
+  private proposeTrade(args: Record<string, any>): FakeResult<null> {
+    const openBetweenPair = this.db.trades.some(
+      (t) =>
+        t.game_id === args.p_game_id &&
+        t.status === "open" &&
+        ((t.from_player_id === args.p_from_player_id && t.to_player_id === args.p_to_player_id) ||
+          (t.from_player_id === args.p_to_player_id && t.to_player_id === args.p_from_player_id)),
+    );
+    if (openBetweenPair) {
+      return { data: null, error: { message: "an open trade already exists between these two players" } };
+    }
+    this.db.trades.push({
+      id: args.p_id,
+      game_id: args.p_game_id,
+      status: "open",
+      from_player_id: args.p_from_player_id,
+      to_player_id: args.p_to_player_id,
+      offer: args.p_offer,
+      request: args.p_request,
+      parent_trade_id: null,
+      round: 1,
+      created_at: new Date().toISOString(),
+    });
+    return { data: null, error: null };
+  }
+
+  private counterTrade(args: Record<string, any>): FakeResult<null> {
+    if (args.p_round > 10) {
+      return { data: null, error: { message: "this negotiation has gone on long enough" } };
+    }
+    const parent = this.db.trades.find(
+      (t) => t.id === args.p_parent_trade_id && t.game_id === args.p_game_id && t.status === "open",
+    );
+    if (!parent) return { data: null, error: { message: "that offer is no longer open" } };
+    parent.status = "superseded";
+    this.db.trades.push({
+      id: args.p_id,
+      game_id: args.p_game_id,
+      status: "open",
+      from_player_id: args.p_from_player_id,
+      to_player_id: args.p_to_player_id,
+      offer: args.p_offer,
+      request: args.p_request,
+      parent_trade_id: args.p_parent_trade_id,
+      round: args.p_round,
+      created_at: new Date().toISOString(),
+    });
+    return { data: null, error: null };
+  }
+
+  private respondTrade(args: Record<string, any>): FakeResult<null> {
+    const trade = this.db.trades.find((t) => t.id === args.p_trade_id && t.status === "open");
+    if (!trade) return { data: null, error: { message: "that offer is no longer open" } };
+    trade.status = args.p_status;
     return { data: null, error: null };
   }
 }

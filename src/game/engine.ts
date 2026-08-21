@@ -70,15 +70,22 @@ export type GameAction =
   | { type: "END_TURN"; playerId: string }
   | { type: "FORCE_END_TURN"; playerId: string }
   | { type: "DECLARE_BANKRUPT"; playerId: string }
+  // Trade negotiation (proposing/countering/declining/cancelling) lives
+  // entirely in the `trades` table now, outside the pure engine — see
+  // src/app/api/games/[code]/trades/**. Only the moment a trade is
+  // actually accepted needs a real state mutation (cash/ownership/jail-
+  // free cards changing hands), so that's the only trade action reduce()
+  // still knows about. playerId must be toPlayerId (the accepting side);
+  // give/receive/fromPlayerId/toPlayerId come from the trades-table row
+  // the API layer already loaded, not from client input.
   | {
-      type: "PROPOSE_TRADE";
+      type: "EXECUTE_ACCEPTED_TRADE";
+      playerId: string;
       fromPlayerId: string;
       toPlayerId: string;
       give: TradeOffer;
       receive: TradeOffer;
-    }
-  | { type: "ACCEPT_TRADE"; playerId: string; tradeId: number }
-  | { type: "DECLINE_TRADE"; playerId: string; tradeId: number };
+    };
 
 export type GameEvent =
   | { type: "GAME_STARTED" }
@@ -110,10 +117,7 @@ export type GameEvent =
   | { type: "PLAYER_BANKRUPT"; playerId: string; creditorId: string | "bank" }
   | { type: "PROPERTIES_RETURNED_TO_MARKET"; playerId: string }
   | { type: "GAME_OVER"; winnerPlayerId: string }
-  | { type: "TRADE_PROPOSED"; tradeId: number }
-  | { type: "TRADE_ACCEPTED"; tradeId: number }
-  | { type: "TRADE_DECLINED"; tradeId: number }
-  | { type: "TRADE_REJECTED"; tradeId: number; reason: string };
+  | { type: "TRADE_ACCEPTED"; fromPlayerId: string; toPlayerId: string };
 
 // The state a freshly-created game starts in, before any player has
 // joined. The caller (API layer) pushes players into `players` directly
@@ -138,8 +142,6 @@ export function createInitialGameState(settings: GameSettings): GameState {
     pendingAuction: null,
     freeParkingPot: 0,
     turnStartedAt: null,
-    trades: [],
-    nextTradeId: 1,
   };
 }
 
@@ -1279,7 +1281,11 @@ function handleDeclareBankrupt(state: GameState, playerId: string, events: GameE
   resolveBankruptcy(state, player, creditorId, events);
 }
 
-function tradeOfferValid(state: GameState, playerId: string, offer: TradeOffer): boolean {
+// Exported for the trades API routes (propose/counter): they need the same
+// "no houses, must actually own it, can afford it" check before writing a
+// new open offer, not just at accept time. Pure/no secrets, same as
+// netWorth/computeDebtReliefPlan — safe to import server- or client-side.
+export function tradeOfferValid(state: GameState, playerId: string, offer: TradeOffer): boolean {
   const player = findPlayer(state, playerId);
   if (!player) return false;
   if (offer.cashCents > player.cashCents) return false;
@@ -1292,61 +1298,48 @@ function tradeOfferValid(state: GameState, playerId: string, offer: TradeOffer):
   return true;
 }
 
-function handleProposeTrade(
+// A player currently frozen mid-debt-resolution can't be traded with —
+// "or one part of an active debt resolution" — since pendingDebt only ever
+// belongs to the current player, that's the only id to check.
+export function isMidDebtResolution(state: GameState, playerId: string): boolean {
+  return state.turnPhase === "awaiting_payment" && state.pendingDebt !== null && currentPlayer(state).id === playerId;
+}
+
+// The only trade-related engine action: actually executing one both sides
+// have already agreed to (proposing/countering/declining live in the
+// `trades` table, outside the pure engine). Re-validates both offers
+// against the LIVE state — ownership/cash may have moved since the offer
+// was made — and pushes no events at all if anything's gone stale, which
+// the API layer reads as "the board has changed since this offer was
+// made" rather than executing a partial/stale trade.
+function handleExecuteAcceptedTrade(
   state: GameState,
-  action: Extract<GameAction, { type: "PROPOSE_TRADE" }>,
+  action: Extract<GameAction, { type: "EXECUTE_ACCEPTED_TRADE" }>,
   events: GameEvent[],
 ): void {
   if (!state.settings.tradingEnabled) return;
+  if (action.playerId !== action.toPlayerId) return;
+  if (isMidDebtResolution(state, action.fromPlayerId) || isMidDebtResolution(state, action.toPlayerId)) return;
   if (!tradeOfferValid(state, action.fromPlayerId, action.give)) return;
   if (!tradeOfferValid(state, action.toPlayerId, action.receive)) return;
 
-  const id = state.nextTradeId;
-  state.nextTradeId += 1;
-  state.trades.push({
-    id,
-    fromPlayerId: action.fromPlayerId,
-    toPlayerId: action.toPlayerId,
-    give: action.give,
-    receive: action.receive,
-  });
-  events.push({ type: "TRADE_PROPOSED", tradeId: id });
-}
-
-function handleAcceptTrade(state: GameState, playerId: string, tradeId: number, events: GameEvent[]): void {
-  const trade = state.trades.find((t) => t.id === tradeId);
-  if (!trade || trade.toPlayerId !== playerId) return;
-  state.trades = state.trades.filter((t) => t.id !== tradeId);
-
-  if (!tradeOfferValid(state, trade.fromPlayerId, trade.give) || !tradeOfferValid(state, trade.toPlayerId, trade.receive)) {
-    events.push({ type: "TRADE_REJECTED", tradeId, reason: "no longer valid" });
-    return;
-  }
-
-  const from = findPlayer(state, trade.fromPlayerId);
-  const to = findPlayer(state, trade.toPlayerId);
+  const from = findPlayer(state, action.fromPlayerId);
+  const to = findPlayer(state, action.toPlayerId);
   if (!from || !to) return;
 
-  from.cashCents -= trade.give.cashCents;
-  to.cashCents += trade.give.cashCents;
-  from.jailFreeCards -= trade.give.jailFreeCards;
-  to.jailFreeCards += trade.give.jailFreeCards;
-  for (const idx of trade.give.spaceIndexes) state.ownership[idx].ownerId = to.id;
+  from.cashCents -= action.give.cashCents;
+  to.cashCents += action.give.cashCents;
+  from.jailFreeCards -= action.give.jailFreeCards;
+  to.jailFreeCards += action.give.jailFreeCards;
+  for (const idx of action.give.spaceIndexes) state.ownership[idx].ownerId = to.id;
 
-  to.cashCents -= trade.receive.cashCents;
-  from.cashCents += trade.receive.cashCents;
-  to.jailFreeCards -= trade.receive.jailFreeCards;
-  from.jailFreeCards += trade.receive.jailFreeCards;
-  for (const idx of trade.receive.spaceIndexes) state.ownership[idx].ownerId = from.id;
+  to.cashCents -= action.receive.cashCents;
+  from.cashCents += action.receive.cashCents;
+  to.jailFreeCards -= action.receive.jailFreeCards;
+  from.jailFreeCards += action.receive.jailFreeCards;
+  for (const idx of action.receive.spaceIndexes) state.ownership[idx].ownerId = from.id;
 
-  events.push({ type: "TRADE_ACCEPTED", tradeId });
-}
-
-function handleDeclineTrade(state: GameState, playerId: string, tradeId: number, events: GameEvent[]): void {
-  const trade = state.trades.find((t) => t.id === tradeId);
-  if (!trade || trade.toPlayerId !== playerId) return;
-  state.trades = state.trades.filter((t) => t.id !== tradeId);
-  events.push({ type: "TRADE_DECLINED", tradeId });
+  events.push({ type: "TRADE_ACCEPTED", fromPlayerId: action.fromPlayerId, toPlayerId: action.toPlayerId });
 }
 
 // ============================================================================
@@ -1422,14 +1415,8 @@ export function reduce(state: GameState, action: GameAction): { state: GameState
     case "DECLARE_BANKRUPT":
       handleDeclareBankrupt(draft, action.playerId, events);
       break;
-    case "PROPOSE_TRADE":
-      handleProposeTrade(draft, action, events);
-      break;
-    case "ACCEPT_TRADE":
-      handleAcceptTrade(draft, action.playerId, action.tradeId, events);
-      break;
-    case "DECLINE_TRADE":
-      handleDeclineTrade(draft, action.playerId, action.tradeId, events);
+    case "EXECUTE_ACCEPTED_TRADE":
+      handleExecuteAcceptedTrade(draft, action, events);
       break;
   }
 
