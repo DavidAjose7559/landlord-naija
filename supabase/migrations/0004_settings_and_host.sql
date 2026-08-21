@@ -16,6 +16,30 @@
 alter table games add column if not exists settings jsonb not null default '{}'::jsonb;
 alter table games add column if not exists host_player_id uuid references players(id) on delete set null;
 
+-- Belt-and-suspenders cleanup before any CREATE OR REPLACE below: earlier
+-- broken runs of this migration (and of 0005) may have left stray
+-- overloads of start_game/apply_game_action behind with different
+-- signatures than what's redeclared here (CREATE OR REPLACE FUNCTION
+-- creates a new overload rather than erroring when the parameter list
+-- doesn't match exactly, so a half-applied prior attempt is exactly the
+-- kind of thing that produces one). Drops every existing overload of
+-- both by name — regardless of its actual current signature — so each
+-- ends up with exactly one definition after this migration, and the
+-- unqualified revoke/grant statements at the bottom stay unambiguous.
+do $$
+declare
+  r record;
+begin
+  for r in
+    select p.oid::regprocedure as sig
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname in ('start_game', 'apply_game_action')
+  loop
+    execute format('drop function %s', r.sig);
+  end loop;
+end $$;
+
 -- CREATE OR REPLACE VIEW requires every existing column to keep its exact
 -- name and ordinal position — Postgres reads an insertion in the middle of
 -- the column list as a rename of whatever was pushed into that slot (here,
@@ -87,14 +111,6 @@ begin
   where id = p_game_id;
 end;
 $$;
-
--- Same rename restriction as apply_game_action below: CREATE OR REPLACE
--- FUNCTION won't let a parameter change name even when its type doesn't
--- change, so if the live signature is still 0002's original
--- p_owambe_deck/p_village_deck (0003's rename apparently didn't stick),
--- redeclaring with p_treasure_deck/p_surprise_deck needs an explicit drop
--- first. Harmless no-op if the live signature already matches.
-drop function if exists start_game(uuid, jsonb, jsonb, jsonb);
 
 create or replace function start_game(
   p_game_id uuid,

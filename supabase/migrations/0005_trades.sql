@@ -117,13 +117,27 @@ $$;
 
 -- CREATE OR REPLACE FUNCTION only replaces a function whose declared
 -- parameter list matches exactly — adding p_accepted_trade_id as a new
--- 13th parameter makes this a different signature from the 12-param
--- version 0002/0004 defined, so without an explicit drop first, Postgres
+-- 13th parameter makes this a different signature from whatever
+-- apply_game_action currently is, so without a drop first, Postgres
 -- creates a second overload instead of replacing the original (which then
--- makes every unqualified reference below ambiguous).
-drop function if exists apply_game_action(
-  uuid, int, jsonb, text, int, int, text, int, jsonb, jsonb, jsonb, jsonb
-);
+-- makes every unqualified reference below ambiguous). Drops every
+-- existing overload by name rather than a hardcoded signature — 0004
+-- already does the same cleanup, so this is normally a no-op, but running
+-- 0005 doesn't have to depend on 0004 having gone first to still end up
+-- with exactly one definition.
+do $$
+declare
+  r record;
+begin
+  for r in
+    select p.oid::regprocedure as sig
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname = 'apply_game_action'
+  loop
+    execute format('drop function %s', r.sig);
+  end loop;
+end $$;
 
 create or replace function apply_game_action(
   p_game_id uuid,
