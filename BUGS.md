@@ -284,3 +284,84 @@ updated live.
   `dragConstraints` + `onDragEnd`-threshold pattern). Tap-outside-to-close
   works on the mobile sheet as a confirmed alternative dismissal path.
 
+- Added an in-game bug report button — a small 🐛 pill fixed to the bottom
+  corner in both the lobby and the board view, always enabled (no turn
+  gating, no session requirement — a spectator can file one), opening a
+  compact form (free-text description + a 3-way severity picker,
+  `mortgageBlockedReason`-style disabled state isn't relevant here since
+  there's nothing to block). Submitting only ever `POST`s to `/api/bugs`,
+  never through the game's own action route — there is no code path from
+  this button to a game-state mutation, which the new
+  "does not mutate game state" unit test asserts directly (byte-identical
+  `GET /api/games/[code]` response before and after a submission).
+
+  Everything except the description/severity is captured automatically:
+  the server independently re-derives room/game id, full state, settings,
+  mapId, turn_phase, current player vs. reporter, every player's cash/
+  position/properties/jail/bankrupt status, the last 20 events, last 5
+  rolls, and any open trade threads with full round history — all read
+  fresh from the DB, never trusted from the client, since a malicious or
+  just-plain-stale client shouldn't be able to fabricate what a report
+  says the game state was. Only the truly client-only half (user agent,
+  viewport, online state, device pixel ratio, and a 20-entry ring buffer
+  of console errors/uncaught exceptions/unhandled rejections/failed fetch
+  calls, installed once at app boot in `src/lib/diagnostics.ts`) comes from
+  the request body as-is, since the server has no way to observe any of
+  that itself.
+
+  New `bug_reports` table (migration `0008_bug_reports.sql`), no RLS
+  policies at all — same treatment as `player_secrets`/`game_secrets` —
+  writes go through a `create_bug_report` RPC using the service role.
+  `game_id` is `ON DELETE SET NULL` on purpose: a report has to outlive
+  the game it describes. Rate-limited to 5 reports per 10 minutes, keyed
+  by `clientToken` when the reporter has a seat and by IP otherwise.
+
+  Review surface at `/bugs`, gated by `?secret=` matching `ADMIN_SECRET` —
+  deliberately NOT the `DEV_HARNESS_SECRET`/`NODE_ENV` pattern, since
+  reports only matter once real players are filing them in production;
+  the secret alone is what keeps it private. Wrong or missing secret is a
+  plain 404 (via `next/navigation`'s `notFound()`), same
+  don't-confirm-the-route-exists posture as the dev harness. Each report
+  expands to its full JSON snapshot and has a "Copy for Claude Code"
+  button producing a single markdown block (description, severity, commit
+  SHA, a curated state slice, last events, captured console/network
+  errors, and a one-line repro hint derived from `turn_phase` + the
+  reporter's board position) — `GET /api/bugs?secret=...&unresolved=true`
+  returns the same markdown concatenated for every open report, for
+  pulling a whole game night's bugs in one paste.
+
+  **Verified:** 13 new unit tests (10 for `/api/bugs`'s POST/GET and
+  `/api/bugs/[id]`'s PATCH, 3 for the `/bugs` page's secret gating) against
+  the same hand-written fake Supabase client every other route test uses —
+  covering the no-mutation guarantee, the rate limit's 6th-request
+  rejection, spectator (no `clientToken`) submissions, and 404s on a
+  missing/wrong secret for both the page and the API. Migration
+  `0008_bug_reports.sql` applied to the real Supabase project (confirmed
+  via a direct `create_bug_report` RPC probe, then cleaned up).
+
+  Live two-tab browser verification against a local dev server pointed at
+  that real project: two-player room, Bola (non-current) filed a report
+  mid-Ada's-turn (`awaiting_roll`). In Bola's tab, the form closed and
+  "Logged. Thanks — that helps." appeared. In Ada's tab: zero disruption —
+  no toast, no modal, Roll still enabled, event log still "Nothing has
+  happened yet." `GET /api/games/[code]` before and after the submission
+  came back **byte-identical** (`diff` on the two responses produced no
+  output), the same check used for the property inspector pass. `/bugs`
+  with the secret listed the report with the full snapshot — room, turn
+  info (`turnPhase: "awaiting_roll"`, current player Ada, reporter not the
+  current player), settings, mapId, both players' cash/position, an empty
+  event/roll/trade history (nothing had happened yet in this fresh room —
+  confirms those arrays are wired to real queries, not hardcoded), and
+  client info (real user agent, viewport, dpr). "Copy for Claude Code"
+  showed a "Copied!" confirmation (`navigator.clipboard.writeText`
+  permission was granted in the automated browser; reading the OS
+  clipboard back was not — `clipboard-read` sat at `prompt`, which a
+  synthetic click can't answer — so the copy itself was verified via the
+  UI's "Copied!" state plus `GET /api/bugs?unresolved=true`, which renders
+  through the exact same shared `formatBugReportMarkdown` function and
+  produced correct, complete markdown including a repro hint). The
+  resolved checkbox was toggled live and persisted. Confirmed 404 (no
+  body leaked) on `/bugs`, `/api/bugs`, and `/api/bugs/[id]` with a
+  missing or wrong secret, both via unit tests and directly with `curl`
+  against the running dev server.
+

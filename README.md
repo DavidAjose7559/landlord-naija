@@ -34,6 +34,11 @@ and Framer Motion.
 - **Debt resolution.** A player who can't cover a debt gets an explicit panel — mortgage/sell
   proactively, or use "Help me raise it" for a server-computed plan (bare properties before houses)
   — rather than being auto-liquidated.
+- **In-game bug reports.** A small 🐛 button, always available (lobby or board, any turn, any
+  player — even a spectator), opens a two-field form (what happened + severity) and silently
+  attaches everything else: the full game state, settings, event log, roll ledger, open trades,
+  browser/console diagnostics, and the exact commit deployed. Never touches game state. See
+  [Bug reports](#bug-reports).
 
 ## Project structure
 
@@ -78,6 +83,15 @@ SUPABASE_SERVICE_ROLE_KEY=<service_role key>
 `SUPABASE_SERVICE_ROLE_KEY` is a secret — it bypasses every RLS policy and must never reach the
 browser. It's only ever read by server-side code under `src/lib/api/` and `src/app/api/`, all of
 which are guarded with `import "server-only"`.
+
+Two more variables are optional:
+
+- `DEV_HARNESS_SECRET` unlocks `POST /api/dev/seed-state`, a test-only backdoor for setting up
+  board states directly instead of playing dice out for real. Only takes effect outside
+  production to begin with — leave it unset in Production.
+- `ADMIN_SECRET` gates the [bug report](#bug-reports) review surface (`/bugs` and
+  `GET`/`PATCH /api/bugs`). Unlike `DEV_HARNESS_SECRET`, this one should stay set in
+  Production — reports only matter once real players are filing them.
 
 ### 4. Apply the database migrations
 
@@ -153,6 +167,32 @@ own browser** — `src/lib/verify-client.ts` reimplements the exact same HMAC/ha
 using the Web Crypto API (the server's implementation, `src/game/dice.ts`, is `server-only` and
 uses Node's `node:crypto`, neither of which run in a browser) — and checks it against what was
 actually recorded. Nobody has to take the server's word for it.
+
+## Bug reports
+
+Every lobby and board view has a small 🐛 button in the bottom corner — always there, never gated
+on whose turn it is or even whether you have a seat. It opens a two-field form (a free-text "what
+happened" and a severity picker) and submits to `POST /api/bugs`, which:
+
+1. Independently re-reads the game's current state, settings, event log, roll ledger, and any open
+   trade negotiations straight from the database — never trusts what the client claims about game
+   state, since a stale or malicious client shouldn't be able to fabricate what a report says
+   happened.
+2. Attaches what only the browser can see: user agent, viewport, online state, device pixel ratio,
+   and the last 20 entries from a lightweight ring buffer (`src/lib/diagnostics.ts`, installed once
+   at app boot) of console errors, uncaught exceptions, unhandled promise rejections, and failed
+   network requests.
+3. Inserts one row into a standalone `bug_reports` table (migration `0008_bug_reports.sql`) —
+   `game_id` is `ON DELETE SET NULL` so a report outlives the game it came from. This path never
+   touches `games`/`players`/`events`/`rolls`/`trades`; it cannot mutate a game even in principle.
+
+Reports are reviewed at `/bugs?secret=<ADMIN_SECRET>` (see [Setup](#3-configure-environment-variables))
+— newest first, each expandable to its full JSON snapshot, with a resolved toggle and a
+**"Copy for Claude Code"** button that produces one paste-ready markdown block (description,
+severity, commit SHA, a curated state slice, recent events, captured console/network errors, and a
+repro hint). `GET /api/bugs?secret=...&unresolved=true` returns that same markdown concatenated for
+every open report — pull a whole session's bugs in one paste from the CLI. Missing or wrong secret
+is a plain 404 everywhere, same posture as the dev harness.
 
 ## Tests
 

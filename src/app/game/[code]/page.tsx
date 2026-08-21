@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ActionBar } from "@/components/ActionBar";
 import { Board } from "@/components/Board";
+import { BugReportButton } from "@/components/BugReportButton";
 import { DiceRoller } from "@/components/DiceRoller";
 import { EventLog } from "@/components/EventLog";
 import { MobileSheet } from "@/components/MobileSheet";
@@ -120,6 +121,8 @@ export default function BoardPage() {
           onNavigate={setInspectedIndex}
         />
       )}
+
+      <BugReportButton roomCode={roomCode} session={session} />
     </div>
   );
 }

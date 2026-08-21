@@ -74,10 +74,20 @@ export interface FakeDb {
   rolls: any[];
   events: any[];
   trades: any[];
+  bugReports: any[];
 }
 
 function emptyDb(): FakeDb {
-  return { games: [], gameSecrets: [], players: [], playerSecrets: [], rolls: [], events: [], trades: [] };
+  return {
+    games: [],
+    gameSecrets: [],
+    players: [],
+    playerSecrets: [],
+    rolls: [],
+    events: [],
+    trades: [],
+    bugReports: [],
+  };
 }
 
 export class FakeSupabaseAdmin {
@@ -117,6 +127,7 @@ export class FakeSupabaseAdmin {
       rolls: this.db.rolls,
       events: this.db.events,
       trades: this.db.trades,
+      bug_reports: this.db.bugReports,
     };
     const rows = tableMap[table];
     if (!rows) throw new Error(`fake supabase: unknown table "${table}"`);
@@ -146,6 +157,10 @@ export class FakeSupabaseAdmin {
           return this.respondTrade(args);
         case "dev_seed_state":
           return this.devSeedState(args);
+        case "create_bug_report":
+          return this.createBugReport(args);
+        case "set_bug_report_resolved":
+          return this.setBugReportResolved(args);
         default:
           return { data: null, error: { message: `unknown rpc ${fn}` } };
       }
@@ -361,6 +376,28 @@ export class FakeSupabaseAdmin {
       player.jail_free_cards = update.jail_free_cards;
       player.bankrupt = update.bankrupt;
     }
+    return { data: null, error: null };
+  }
+
+  private createBugReport(args: Record<string, any>): FakeResult<null> {
+    this.db.bugReports.push({
+      id: args.p_id,
+      game_id: args.p_game_id,
+      reporter_player_id: args.p_reporter_player_id,
+      room_code: args.p_room_code,
+      severity: args.p_severity,
+      description: args.p_description,
+      commit_sha: args.p_commit_sha,
+      snapshot: args.p_snapshot,
+      resolved: false,
+      created_at: new Date().toISOString(),
+    });
+    return { data: null, error: null };
+  }
+
+  private setBugReportResolved(args: Record<string, any>): FakeResult<null> {
+    const report = this.db.bugReports.find((r) => r.id === args.p_id);
+    if (report) report.resolved = args.p_resolved;
     return { data: null, error: null };
   }
 }

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { DiagnosticsBoot } from "@/components/DiagnosticsBoot";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -39,6 +40,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           data-gr-* attributes onto <body> before React hydrates, which would
           otherwise report as a false-positive mismatch every time. */}
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
+        <DiagnosticsBoot />
         {children}
       </body>
     </html>
