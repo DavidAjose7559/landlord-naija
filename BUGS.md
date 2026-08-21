@@ -122,6 +122,83 @@ would do nothing.
 underlying bankruptcy-transfer flow it sits in front of) against a local
 dev server with the new seed-state harness.
 
+## 6. handleMortgage/handleUnmortgage had no turn or phase gate at all
+
+**Spec:** voluntary mortgaging — raising cash by mortgaging a property when
+you're *not* in debt, purely to fund building elsewhere, interleaved freely
+with build/sell/unmortgage on your own turn.
+
+**Repro (found while auditing, not from a report):** with an opponent's
+turn active, `MORTGAGE`/`UNMORTGAGE` on your own property still applied —
+`handleMortgage`/`handleUnmortgage` checked property ownership but never
+checked whose turn it was or what `turnPhase` the game was in. A player
+could mortgage or unmortgage mid-opponent's-turn, mid-auction, or mid-
+someone-else's-debt.
+
+**Fix:** both now gate on `currentPlayer(state).id === playerId`, matching
+every other action handler, and exclude only `turnPhase === "game_over"` —
+mortgage/unmortgage are legal in any phase of your own turn, including
+`awaiting_payment` (see the interpretation note below).
+
+**Already correct, verified by direct code read, no changes needed:**
+- **Building blocked by a mortgaged region-mate:** `ownsFullUnmortgagedGroup`
+  (added for the property inspector) already requires every property in the
+  color group to be owned *and* unmortgaged before `canBuildHouse` allows a
+  build — this is scoped per-`space.color`, so mortgaging properties in one
+  region was already structurally incapable of blocking a build in an
+  unrelated region. The core "mortgage region A, build region B, same turn"
+  scenario worked correctly with zero engine changes.
+- **Mortgaged-but-still-owned:** mortgaging only flips `own.mortgaged`, never
+  deletes the ownership entry, so a mortgaged property can never appear
+  available for another player to buy — set-completion blocking (rule 4)
+  falls out of the data model for free.
+- **No rent while mortgaged:** `resolveLanding` returns immediately when
+  `own.mortgaged` is true, before rent is ever computed.
+- **Unmortgage cost:** `computeMortgage` in `board.ts` already computes
+  `Math.ceil(mortgageValue * 1.1)` — mortgage value plus 10%, rounded up.
+- **Trading a mortgaged property:** `handleExecuteAcceptedTrade` only
+  reassigns `ownerId` on transferred spaces; `mortgaged`/`houses`/`hotel`
+  carry over untouched, so the receiving player inherits the mortgage as-is.
+
+**UI:** PlayerPanel's Mortgage button used to be hidden entirely whenever
+the property had houses (rather than shown-and-disabled), and Sell/
+Mortgage/Unmortgage had no reason-surfacing at all. New exported
+`mortgageBlockedReason`/`unmortgageBlockedReason`/`sellHouseBlockedReason`
+(same pattern as `buildHouseBlockedReason` from bug #4) now back every one
+of the four portfolio buttons, each disabled-with-tooltip before the click
+rather than erroring after it. Every button also shows its exact cash
+delta (`Mortgage — +$25`, `Unmortgage — −$27.50`, `Build house — −$50`,
+`Sell house — +$25`), computed from the same `mortgageValue`/
+`unmortgageCost`/`houseCost` fields the engine charges from — never
+re-derived or guessed.
+
+**Interpretation note, disclosed rather than silently deviating from the
+literal spec:** the spec's wording is "available in any turn_phase except
+resolving_debt." This codebase's debt phase is `awaiting_payment`, and it's
+already the phase `computeDebtReliefPlan`'s "help me raise it" flow uses to
+call `handleMortgage`/`handleSellHouse` directly — a previously-shipped,
+tested self-service debt-relief path (see bug #5). Excluding
+`awaiting_payment` from mortgage/unmortgage/sell-house, as the literal spec
+text asks, would have regressed that feature. Kept `awaiting_payment`
+reachable for those three (a debtor raising cash to pay down what they owe
+is exactly as legitimate a use as the voluntary case this spec is about),
+and excluded it only for `BUILD_HOUSE` — taking on new expansion while you
+owe an unresolved debt stays disallowed, matching both spec intent and
+pre-existing design.
+
+**Status:** fixed and verified — 4 new engine unit tests (bare-property
+mortgage cash delta + zero rent; house-present mortgage rejection; build
+rejected when a region-mate is mortgaged; the core mortgage-region-A-then-
+build-region-B-same-turn scenario) plus a live two-tab local run against a
+running dev server via the `POST /api/dev/seed-state` harness: seeded a
+player owning two brown and three lightblue properties, mortgaged both
+brown properties and built a house on a lightblue property through the
+real UI in one tab, and confirmed in a second, unauthenticated spectating
+tab — no manual refresh — that cash, the event log ("Ada mortgaged Agege.",
+"Ada mortgaged Mushin.", "Ada built a house on Ojuelegba."), the dimmed
+diagonal strike on both mortgaged spaces, and the new house marker all
+updated live.
+
 ## Notes (not bugs)
 
 - Auction UI ("waiting for X to bid or pass…", auction ordering starting

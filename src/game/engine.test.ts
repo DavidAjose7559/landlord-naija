@@ -322,6 +322,88 @@ describe("building houses", () => {
   });
 });
 
+describe("voluntary mortgaging", () => {
+  it("mortgaging a bare property mid-turn adds exactly the mortgage value, and the property then collects no rent", () => {
+    const space1 = BOARD[1] as PropertySpace;
+    let state = makeState(
+      [makePlayer("p1", 0, { cashCents: 100_000 }), makePlayer("p2", 1, { position: 39, cashCents: 100_000 })],
+      {
+        turnPhase: "awaiting_end_turn",
+        ownership: { 1: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false } },
+      },
+    );
+
+    const mortgageResult = reduce(state, { type: "MORTGAGE", playerId: "p1", spaceIndex: 1 });
+    state = mortgageResult.state;
+
+    expect(state.ownership[1].mortgaged).toBe(true);
+    expect(state.players[0].cashCents).toBe(100_000 + space1.mortgageValue);
+    expect(mortgageResult.events.some((e) => e.type === "MORTGAGED")).toBe(true);
+
+    // Land p2 exactly on the now-mortgaged property (39 -> 1, wrapping past GO) and confirm
+    // the only cash change is the GO salary — no rent is charged on a mortgaged property.
+    state = { ...state, currentPlayerIndex: 1, turnPhase: "awaiting_roll" };
+    const { state: afterLanding, events } = reduce(state, { type: "ROLL", playerId: "p2", d1: 1, d2: 1 });
+
+    expect(afterLanding.players[1].position).toBe(1);
+    expect(afterLanding.players[1].cashCents).toBe(100_000 + 20_000); // GO salary only
+    expect(events.some((e) => e.type === "RENT_PAID")).toBe(false);
+  });
+
+  it("rejects mortgaging a property that has a house on it", () => {
+    const state = makeState([makePlayer("p1", 0, { cashCents: 100_000 }), makePlayer("p2", 1)], {
+      turnPhase: "awaiting_end_turn",
+      ownership: {
+        1: { ownerId: "p1", houses: 1, hotel: false, mortgaged: false },
+        3: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false },
+      },
+    });
+
+    const { state: next, events } = reduce(state, { type: "MORTGAGE", playerId: "p1", spaceIndex: 1 });
+
+    expect(next.ownership[1].mortgaged).toBe(false);
+    expect(next.players[0].cashCents).toBe(100_000);
+    expect(events).toHaveLength(0);
+  });
+
+  it("rejects building on a region where any member property is mortgaged", () => {
+    const state = makeState([makePlayer("p1", 0, { cashCents: 100_000 }), makePlayer("p2", 1)], {
+      turnPhase: "awaiting_end_turn",
+      ownership: {
+        6: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false },
+        8: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false },
+        9: { ownerId: "p1", houses: 0, hotel: false, mortgaged: true }, // one mortgaged member of the group
+      },
+    });
+
+    const { state: next, events } = reduce(state, { type: "BUILD_HOUSE", playerId: "p1", spaceIndex: 6 });
+
+    expect(next.ownership[6].houses).toBe(0);
+    expect(events).toHaveLength(0);
+  });
+
+  it("mortgaging region A does not block building in region B in the same turn", () => {
+    let state = makeState([makePlayer("p1", 0, { cashCents: 100_000 }), makePlayer("p2", 1)], {
+      turnPhase: "awaiting_end_turn",
+      ownership: {
+        1: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false }, // brown region A
+        3: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false },
+        6: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false }, // lightblue region B
+        8: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false },
+        9: { ownerId: "p1", houses: 0, hotel: false, mortgaged: false },
+      },
+    });
+
+    state = reduce(state, { type: "MORTGAGE", playerId: "p1", spaceIndex: 1 }).state;
+    state = reduce(state, { type: "MORTGAGE", playerId: "p1", spaceIndex: 3 }).state;
+    expect(state.ownership[1].mortgaged).toBe(true);
+    expect(state.ownership[3].mortgaged).toBe(true);
+
+    const { state: next } = reduce(state, { type: "BUILD_HOUSE", playerId: "p1", spaceIndex: 6 });
+    expect(next.ownership[6].houses).toBe(1);
+  });
+});
+
 describe("bankruptcy", () => {
   it("transfers every asset (cash, properties, jail-free cards) to the creditor", () => {
     const debtor = makePlayer("debtor", 0, { cashCents: 300, jailFreeCards: 1 });

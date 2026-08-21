@@ -243,7 +243,10 @@ export function ownsFullUnmortgagedGroup(state: GameState, ownerId: string, colo
   });
 }
 
-function getMortgageableSpace(
+// Exported for mortgageBlockedReason/unmortgageBlockedReason below — same
+// reasoning as the rent-function exports: the UI needs the identical
+// type-narrowing the handler uses, not a re-derived copy of it.
+export function getMortgageableSpace(
   state: GameState,
   spaceIndex: number,
 ): (Space & { price: number; mortgageValue: number; unmortgageCost: number }) | undefined {
@@ -596,7 +599,18 @@ function totalHotelsInPlay(state: GameState): number {
 // human reason to show *before* dispatching, so an illegal build is a
 // disabled button with an explanation rather than a silent no-op.
 // Pure/no secrets — safe to import client-side, same as netWorth.
+//
+// (Voluntary-mortgage pass) previously skipped the turn/phase check
+// entirely — canBuildHouse doesn't check it either, since handleBuildHouse
+// enforces it independently, but that means the UI could show an *enabled*
+// Build button on someone else's turn that then silently no-ops on click,
+// exactly the bug class this function exists to prevent. Now matches
+// handleBuildHouse's own gate exactly (any phase except resolving a debt or
+// game over), so the two can't drift out of sync with each other.
 export function buildHouseBlockedReason(state: GameState, playerId: string, spaceIndex: number): string | null {
+  if (currentPlayer(state).id !== playerId) return "Wait for your turn.";
+  if (state.turnPhase === "awaiting_payment") return "Resolve your debt first.";
+  if (state.turnPhase === "game_over") return "The game is over.";
   const space = boardOf(state)[spaceIndex];
   if (space.type !== "property") return "Not a buildable property.";
   const own = state.ownership[spaceIndex];
@@ -618,6 +632,62 @@ export function buildHouseBlockedReason(state: GameState, playerId: string, spac
     return totalHousesInPlay(state) < MAX_HOUSES_IN_BANK ? null : "The bank is out of houses.";
   }
   return totalHotelsInPlay(state) < MAX_HOTELS_IN_BANK ? null : "The bank is out of hotels.";
+}
+
+// Same pattern, for SELL_HOUSE — canSellHouse doesn't check turn/phase
+// either (handleSellHouse does), and even-sell can silently block a
+// mid-stack sale the exact same way even-build blocks a mid-stack build.
+export function sellHouseBlockedReason(state: GameState, playerId: string, spaceIndex: number): string | null {
+  if (currentPlayer(state).id !== playerId) return "Wait for your turn.";
+  if (state.turnPhase === "game_over") return "The game is over.";
+  const space = boardOf(state)[spaceIndex];
+  if (space.type !== "property") return "Not a sellable property.";
+  const own = state.ownership[spaceIndex];
+  if (!own || own.ownerId !== playerId) return "You don't own this.";
+  const thisLevel = groupHouseLevel(state, spaceIndex);
+  if (thisLevel === 0) return "Nothing to sell here.";
+
+  const group = ownedPropertyIndexesInGroup(state, space.color);
+  const levels = group.map((idx) => groupHouseLevel(state, idx));
+  if (state.settings.evenBuild && thisLevel !== Math.max(...levels)) {
+    return "Sell evenly — this region has properties with more houses first.";
+  }
+  if (thisLevel === 5 && totalHousesInPlay(state) + 4 > MAX_HOUSES_IN_BANK) {
+    return "Not enough houses left in the bank to downgrade this hotel.";
+  }
+  return null;
+}
+
+// Voluntary mortgaging — the whole point of this pass: raise cash by
+// mortgaging properties that have nothing to do with what you're about to
+// build, any time on your own turn, whether or not you owe anything.
+// Mirrors handleMortgage's own checks exactly (plus the turn/phase gate
+// that function also needed — see its comment) so the two can't drift.
+export function mortgageBlockedReason(state: GameState, playerId: string, spaceIndex: number): string | null {
+  if (!state.settings.mortgageEnabled) return "Mortgaging is turned off for this room.";
+  if (currentPlayer(state).id !== playerId) return "Wait for your turn.";
+  if (state.turnPhase === "game_over") return "The game is over.";
+  const space = getMortgageableSpace(state, spaceIndex);
+  if (!space) return "Not mortgageable.";
+  const own = state.ownership[spaceIndex];
+  if (!own || own.ownerId !== playerId) return "You don't own this.";
+  if (own.mortgaged) return "Already mortgaged.";
+  if (own.houses > 0 || own.hotel) return "Sell the houses first.";
+  return null;
+}
+
+export function unmortgageBlockedReason(state: GameState, playerId: string, spaceIndex: number): string | null {
+  if (!state.settings.mortgageEnabled) return "Mortgaging is turned off for this room.";
+  if (currentPlayer(state).id !== playerId) return "Wait for your turn.";
+  if (state.turnPhase === "game_over") return "The game is over.";
+  const space = getMortgageableSpace(state, spaceIndex);
+  if (!space) return "Not mortgageable.";
+  const own = state.ownership[spaceIndex];
+  if (!own || own.ownerId !== playerId) return "You don't own this.";
+  if (!own.mortgaged) return "Not mortgaged.";
+  const player = currentPlayer(state);
+  if (player.cashCents < space.unmortgageCost) return "You can't afford this yet.";
+  return null;
 }
 
 function canBuildHouse(state: GameState, playerId: string, spaceIndex: number): boolean {
@@ -1209,7 +1279,13 @@ function handleDrawCard(
 function handleBuildHouse(state: GameState, playerId: string, spaceIndex: number, events: GameEvent[]): void {
   const player = currentPlayer(state);
   if (player.id !== playerId) return;
-  if (state.turnPhase !== "awaiting_roll" && state.turnPhase !== "awaiting_end_turn") return;
+  // (Voluntary-mortgage pass) was awaiting_roll/awaiting_end_turn only —
+  // building is now available at any point on your own turn (mortgage
+  // three properties, then build, all before or after rolling), the same
+  // as mortgaging/selling. awaiting_payment stays excluded on purpose:
+  // building new houses while you owe an unresolved debt stays disallowed
+  // (see handleSellHouse's comment — only unwinding is allowed there).
+  if (state.turnPhase === "awaiting_payment" || state.turnPhase === "game_over") return;
   if (!canBuildHouse(state, playerId, spaceIndex)) return;
 
   const space = boardOf(state)[spaceIndex] as PropertySpace;
@@ -1229,12 +1305,15 @@ function handleBuildHouse(state: GameState, playerId: string, spaceIndex: number
 function handleSellHouse(state: GameState, playerId: string, spaceIndex: number, events: GameEvent[]): void {
   const player = currentPlayer(state);
   if (player.id !== playerId) return;
-  // awaiting_payment is included so a debtor can sell houses to raise cash
-  // (see computeDebtReliefPlan/"Raise it myself") — building new houses
-  // mid-debt stays disallowed (see handleBuildHouse), only unwinding does.
-  if (state.turnPhase !== "awaiting_roll" && state.turnPhase !== "awaiting_end_turn" && state.turnPhase !== "awaiting_payment") {
-    return;
-  }
+  // awaiting_payment is included (not just awaiting_roll/awaiting_end_turn)
+  // so a debtor can sell houses to raise cash — both as the "raise it
+  // myself" self-service option and via computeDebtReliefPlan's own
+  // internal call to this same handler — and, since the Voluntary-mortgage
+  // pass, so can any player on any other phase of their own turn, whether
+  // or not they owe anything. Only game_over is excluded. Building new
+  // houses mid-debt stays disallowed (see handleBuildHouse), only
+  // unwinding does.
+  if (state.turnPhase === "game_over") return;
   if (!canSellHouse(state, playerId, spaceIndex)) return;
 
   const space = boardOf(state)[spaceIndex] as PropertySpace;
@@ -1249,8 +1328,18 @@ function handleSellHouse(state: GameState, playerId: string, spaceIndex: number,
   events.push({ type: "HOUSE_SOLD", playerId, spaceIndex, houses: own.houses, hotel: own.hotel });
 }
 
+// (Voluntary-mortgage pass, real bug) this had NO turn or phase check at
+// all — any player could mortgage their own property during anyone else's
+// turn, in any phase, including mid-auction or mid-someone-else's-debt.
+// Now gated the same as handleSellHouse: any phase on your own turn except
+// game_over. Deliberately NOT excluding awaiting_payment — mortgaging is
+// as legitimate a self-service debt-relief move as selling houses is (see
+// that handler's comment), and computeDebtReliefPlan's own internal call
+// to this same handler depends on awaiting_payment staying reachable here.
 function handleMortgage(state: GameState, playerId: string, spaceIndex: number, events: GameEvent[]): void {
   if (!state.settings.mortgageEnabled) return;
+  if (currentPlayer(state).id !== playerId) return;
+  if (state.turnPhase === "game_over") return;
   const own = state.ownership[spaceIndex];
   const space = getMortgageableSpace(state, spaceIndex);
   if (!own || !space || own.ownerId !== playerId || own.mortgaged) return;
@@ -1265,6 +1354,9 @@ function handleMortgage(state: GameState, playerId: string, spaceIndex: number, 
 }
 
 function handleUnmortgage(state: GameState, playerId: string, spaceIndex: number, events: GameEvent[]): void {
+  if (!state.settings.mortgageEnabled) return;
+  if (currentPlayer(state).id !== playerId) return;
+  if (state.turnPhase === "game_over") return;
   const own = state.ownership[spaceIndex];
   const space = getMortgageableSpace(state, spaceIndex);
   if (!own || !space || own.ownerId !== playerId || !own.mortgaged) return;

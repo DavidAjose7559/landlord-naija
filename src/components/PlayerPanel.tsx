@@ -2,12 +2,19 @@
 
 import { useState } from "react";
 import type { ColorGroup } from "@/game/board";
-import { buildHouseBlockedReason } from "@/game/engine";
+import {
+  buildHouseBlockedReason,
+  getMortgageableSpace,
+  mortgageBlockedReason,
+  sellHouseBlockedReason,
+  unmortgageBlockedReason,
+} from "@/game/engine";
 import { MAPS } from "@/game/maps";
 import type { PlayerState } from "@/game/types";
 import type { ClientAction } from "@/lib/api/client-action";
 import type { PublicGame } from "@/lib/api/public-game";
 import { COLOR_GROUP_HEX } from "@/lib/board-colors";
+import { formatCAD } from "@/lib/money";
 import type { PlayerSession } from "@/lib/session";
 import { Money } from "./Money";
 import { TokenIcon } from "./TokenIcon";
@@ -28,6 +35,8 @@ interface OwnedSpaceInfo {
   hotel: boolean;
   mortgaged: boolean;
   houseCost: number | null;
+  mortgageValue: number;
+  unmortgageCost: number;
 }
 
 function ownedSpaces(game: PublicGame, playerId: string): OwnedSpaceInfo[] {
@@ -37,6 +46,7 @@ function ownedSpaces(game: PublicGame, playerId: string): OwnedSpaceInfo[] {
     .map(([idxStr, own]) => {
       const idx = Number(idxStr);
       const space = spaces[idx];
+      const mortgageable = getMortgageableSpace(game.state, idx);
       const color = space.type === "property" ? space.color : null;
       const groupKey = color ?? (space.type === "transport" ? "transport" : "utility");
       return {
@@ -48,6 +58,8 @@ function ownedSpaces(game: PublicGame, playerId: string): OwnedSpaceInfo[] {
         hotel: own.hotel,
         mortgaged: own.mortgaged,
         houseCost: space.type === "property" ? space.houseCost : null,
+        mortgageValue: mortgageable?.mortgageValue ?? 0,
+        unmortgageCost: mortgageable?.unmortgageCost ?? 0,
       };
     })
     .sort((a, b) => a.index - b.index);
@@ -159,10 +171,15 @@ function Portfolio({
                 {space.name}
                 {space.hotel ? " · hotel" : space.houses > 0 ? ` · ${space.houses}h` : ""}
               </button>
-              {space.houseCost !== null && !space.mortgaged && (
+              {space.houseCost !== null && (
                 <>
                   {(() => {
                     const blockedReason = buildHouseBlockedReason(game.state, player.id, space.index);
+                    const thisLevel = space.hotel ? 5 : space.houses;
+                    const label =
+                      thisLevel >= 5
+                        ? "Max built"
+                        : `Build ${thisLevel === 4 ? "hotel" : "house"} — −${formatCAD(space.houseCost)}`;
                     return (
                       <button
                         type="button"
@@ -171,42 +188,59 @@ function Portfolio({
                         onClick={() => onAct({ type: "BUILD_HOUSE", spaceIndex: space.index }, space.index)}
                         className="rounded-full bg-accent/20 px-2.5 py-1 font-medium text-accent hover:bg-accent/30 disabled:opacity-40"
                       >
-                        Build
+                        {label}
                       </button>
                     );
                   })()}
-                  {(space.houses > 0 || space.hotel) && (
-                    <button
-                      type="button"
-                      disabled={busySpace === space.index}
-                      onClick={() => onAct({ type: "SELL_HOUSE", spaceIndex: space.index }, space.index)}
-                      className="rounded-full bg-surface-2 px-2.5 py-1 font-medium text-ink hover:bg-white/10 disabled:opacity-40"
-                    >
-                      Sell
-                    </button>
-                  )}
+                  {(space.houses > 0 || space.hotel) &&
+                    (() => {
+                      const blockedReason = sellHouseBlockedReason(game.state, player.id, space.index);
+                      const label = `Sell ${space.hotel ? "hotel" : "house"} — +${formatCAD(Math.floor(space.houseCost / 2))}`;
+                      return (
+                        <button
+                          type="button"
+                          disabled={busySpace === space.index || blockedReason !== null}
+                          title={blockedReason ?? undefined}
+                          onClick={() => onAct({ type: "SELL_HOUSE", spaceIndex: space.index }, space.index)}
+                          className="rounded-full bg-surface-2 px-2.5 py-1 font-medium text-ink hover:bg-white/10 disabled:opacity-40"
+                        >
+                          {label}
+                        </button>
+                      );
+                    })()}
                 </>
               )}
-              {!space.mortgaged && space.houses === 0 && !space.hotel && game.state.settings.mortgageEnabled && (
-                <button
-                  type="button"
-                  disabled={busySpace === space.index}
-                  onClick={() => onAct({ type: "MORTGAGE", spaceIndex: space.index }, space.index)}
-                  className="rounded-full bg-surface-2 px-2.5 py-1 font-medium text-ink hover:bg-white/10 disabled:opacity-40"
-                >
-                  Mortgage
-                </button>
-              )}
-              {space.mortgaged && (
-                <button
-                  type="button"
-                  disabled={busySpace === space.index}
-                  onClick={() => onAct({ type: "UNMORTGAGE", spaceIndex: space.index }, space.index)}
-                  className="rounded-full bg-accent/20 px-2.5 py-1 font-medium text-accent hover:bg-accent/30 disabled:opacity-40"
-                >
-                  Unmortgage
-                </button>
-              )}
+              {!space.mortgaged &&
+                game.state.settings.mortgageEnabled &&
+                (() => {
+                  const blockedReason = mortgageBlockedReason(game.state, player.id, space.index);
+                  return (
+                    <button
+                      type="button"
+                      disabled={busySpace === space.index || blockedReason !== null}
+                      title={blockedReason ?? undefined}
+                      onClick={() => onAct({ type: "MORTGAGE", spaceIndex: space.index }, space.index)}
+                      className="rounded-full bg-surface-2 px-2.5 py-1 font-medium text-ink hover:bg-white/10 disabled:opacity-40"
+                    >
+                      {`Mortgage — +${formatCAD(space.mortgageValue)}`}
+                    </button>
+                  );
+                })()}
+              {space.mortgaged &&
+                (() => {
+                  const blockedReason = unmortgageBlockedReason(game.state, player.id, space.index);
+                  return (
+                    <button
+                      type="button"
+                      disabled={busySpace === space.index || blockedReason !== null}
+                      title={blockedReason ?? undefined}
+                      onClick={() => onAct({ type: "UNMORTGAGE", spaceIndex: space.index }, space.index)}
+                      className="rounded-full bg-accent/20 px-2.5 py-1 font-medium text-accent hover:bg-accent/30 disabled:opacity-40"
+                    >
+                      {`Unmortgage — −${formatCAD(space.unmortgageCost)}`}
+                    </button>
+                  );
+                })()}
             </div>
           ))}
         </div>
