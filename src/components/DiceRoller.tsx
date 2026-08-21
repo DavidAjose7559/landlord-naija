@@ -67,16 +67,20 @@ export function DiceRoller({ game, isMyTurn, dispatch, muted }: DiceRollerProps)
   const shownD2 = rolling ? tumble[1] : (lastRoll?.d2 ?? null);
 
   return (
-    <div className="flex flex-col items-center gap-4">
+    <div className="flex w-full max-w-full flex-col items-center gap-4">
       <div className="flex gap-3" aria-hidden="true">
         <Die face={shownD1} spinning={rolling} />
         <Die face={shownD2} spinning={rolling} />
       </div>
+      {/* (Section 4e) min-w-0 lets this shrink below its text's natural
+          width instead of overflowing the board's centre on a narrow
+          mobile board — the "Waiting for Sonofdavid…" label is the long
+          case this has to survive. */}
       <button
         type="button"
         onClick={handleRoll}
         disabled={!canRoll}
-        className="rounded-full bg-accent px-10 py-3.5 text-base font-semibold text-accent-foreground transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+        className="min-w-0 max-w-full rounded-full bg-accent px-6 py-3 text-sm font-semibold text-accent-foreground transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 sm:px-10 sm:py-3.5 sm:text-base"
         aria-live="polite"
       >
         {rolling ? "Rolling…" : isMyTurn && game.turnPhase === "awaiting_roll" ? "Roll" : waitingLabel(game, isMyTurn)}

@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { Deck } from "@/game/board";
+import { useState } from "react";
 import { computeDebtReliefPlan } from "@/game/engine";
 import { MAPS } from "@/game/maps";
 import type { PlayerState } from "@/game/types";
@@ -9,7 +8,6 @@ import type { ClientAction } from "@/lib/api/client-action";
 import type { PublicGame } from "@/lib/api/public-game";
 import { formatCAD } from "@/lib/money";
 import type { PlayerSession } from "@/lib/session";
-import { supabase } from "@/lib/supabase/client";
 import { Modal } from "./Modal";
 
 interface ActionBarProps {
@@ -18,28 +16,17 @@ interface ActionBarProps {
   dispatch: (action: ClientAction) => Promise<{ ok: boolean; reason?: string } | null>;
 }
 
-interface DrawnCard {
-  deck: Deck;
-  text: string;
-}
-
-const DECK_STYLE: Record<Deck, string> = {
-  treasure: "bg-gold/15 border-2 border-gold text-gold",
-  surprise: "bg-magenta/15 border-2 border-magenta text-magenta",
-};
-
+// (Section 4d) Roll, End Turn, and the card draw/reveal now live in the
+// board's own centre (see BoardCenterControls) — this sidebar only ever
+// hosts the bigger, multi-choice prompts (buy/decline/auction, the debt
+// panel, jail options) that wouldn't fit in that compact slot.
 export function ActionBar({ game, session, dispatch }: ActionBarProps) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [drawnCard, setDrawnCard] = useState<DrawnCard | null>(null);
 
   const map = MAPS[game.state.settings.mapId];
   const me = session ? game.state.players.find((p) => p.id === session.playerId) : undefined;
   const isMyTurn = me?.id === game.state.players[game.state.currentPlayerIndex]?.id;
-
-  useEffect(() => {
-    setDrawnCard(null);
-  }, [game.turnPhase, game.rollIndex]);
 
   async function act(action: ClientAction) {
     setBusy(true);
@@ -48,23 +35,6 @@ export function ActionBar({ game, session, dispatch }: ActionBarProps) {
     if (result && !result.ok) setMessage(result.reason ?? "That didn't work.");
     setBusy(false);
     return result;
-  }
-
-  async function handleDrawCard() {
-    const result = await act({ type: "DRAW_CARD" });
-    if (!result?.ok) return;
-    const { data } = await supabase
-      .from("events")
-      .select("payload")
-      .eq("game_id", game.id)
-      .eq("type", "CARD_DRAWN")
-      .order("seq", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    const payload = data?.payload as { deck?: Deck; text?: string } | undefined;
-    if (payload?.deck && payload.text) {
-      setDrawnCard({ deck: payload.deck, text: payload.text });
-    }
   }
 
   const debtor =
@@ -76,22 +46,6 @@ export function ActionBar({ game, session, dispatch }: ActionBarProps) {
     <div className="flex flex-col gap-3">
       {game.status === "active" && game.state.settings.allowManualBankruptcy && !me.bankrupt && (
         <ManualBankruptcyButton busy={busy} act={act} />
-      )}
-
-      {!me.bankrupt && drawnCard && (
-        <div className={`flex flex-col gap-3 rounded-2xl p-5 ${DECK_STYLE[drawnCard.deck]}`}>
-          <span className="text-xs font-semibold tracking-widest uppercase opacity-80">
-            {map.deckLabels[drawnCard.deck]}
-          </span>
-          <p className="text-base leading-snug font-medium">{drawnCard.text}</p>
-          <button
-            type="button"
-            onClick={() => setDrawnCard(null)}
-            className="self-end rounded-full bg-black/20 px-4 py-1.5 text-xs font-semibold hover:bg-black/30"
-          >
-            Continue
-          </button>
-        </div>
       )}
 
       {!me.bankrupt && game.turnPhase === "awaiting_payment" && !isMyTurn && debtor && (
@@ -134,30 +88,6 @@ export function ActionBar({ game, session, dispatch }: ActionBarProps) {
 
           {game.turnPhase === "awaiting_payment" && game.state.pendingDebt && (
             <DebtPanel game={game} me={me} busy={busy} act={act} />
-          )}
-
-          {game.turnPhase === "awaiting_card" && !drawnCard && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={handleDrawCard}
-              className={`rounded-2xl px-6 py-4 text-base font-semibold ${
-                game.state.pendingCardDeck ? DECK_STYLE[game.state.pendingCardDeck] : ""
-              } disabled:opacity-60`}
-            >
-              Draw {game.state.pendingCardDeck ? map.deckLabels[game.state.pendingCardDeck] : ""} card
-            </button>
-          )}
-
-          {game.turnPhase === "awaiting_end_turn" && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => act({ type: "END_TURN" })}
-              className="rounded-full bg-surface-2 px-8 py-3 text-base font-semibold text-ink transition-colors hover:bg-white/10 disabled:opacity-40"
-            >
-              End Turn
-            </button>
           )}
         </>
       )}

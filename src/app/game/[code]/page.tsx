@@ -6,7 +6,6 @@ import { useEffect, useState } from "react";
 import { ActionBar } from "@/components/ActionBar";
 import { AuctionModal } from "@/components/AuctionModal";
 import { Board } from "@/components/Board";
-import { DiceRoller } from "@/components/DiceRoller";
 import { LogChatTabs } from "@/components/LogChatTabs";
 import { MobileSheet } from "@/components/MobileSheet";
 import { PlayerPanel } from "@/components/PlayerPanel";
@@ -37,8 +36,6 @@ export default function BoardPage() {
   if (loading) return <CenteredMessage>Loading…</CenteredMessage>;
   if (error && !game) return <CenteredMessage>{error}</CenteredMessage>;
   if (!game || game.status === "lobby") return null;
-
-  const isMyTurn = session ? game.state.players[game.state.currentPlayerIndex]?.id === session.playerId : false;
 
   const panelContent = (
     <div className="flex flex-col gap-6">
@@ -90,7 +87,6 @@ export default function BoardPage() {
 
       {game.status === "active" && (
         <>
-          <DiceRoller game={game} isMyTurn={isMyTurn} dispatch={dispatch} muted={muted} />
           <ActionBar game={game} session={session} dispatch={dispatch} />
           {session && <TradePanel game={game} session={session} />}
         </>
@@ -116,7 +112,15 @@ export default function BoardPage() {
       data-theme={MAPS[game.state.settings.mapId].theme}
       className="flex min-h-screen flex-col gap-8 bg-canvas px-4 py-8 pb-40 md:flex-row md:items-start md:justify-center md:gap-10 md:px-8 md:pb-8"
     >
-      <Board state={game.state} className="md:sticky md:top-8" onInspect={setInspectedIndex} />
+      <Board
+        state={game.state}
+        className="md:sticky md:top-8"
+        onInspect={setInspectedIndex}
+        game={game}
+        session={session}
+        dispatch={dispatch}
+        muted={muted}
+      />
 
       <MobileSheet>{panelContent}</MobileSheet>
 

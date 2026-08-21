@@ -2,6 +2,8 @@
 
 import { AnimatePresence, motion, type PanInfo } from "framer-motion";
 import { useEffect, useId, useState } from "react";
+import { createPortal } from "react-dom";
+import { useBoardCenterSlot } from "@/lib/board-center-slot";
 import {
   GO_SALARY,
   TRANSPORT_INDEXES,
@@ -33,12 +35,17 @@ interface PropertyInspectorProps {
 const DRAG_TO_CLOSE_THRESHOLD = 90;
 
 // Read-only, no turn restriction, no state mutation: renders purely from
-// `state`, dispatches nothing. Desktop gets the shared Modal (centered,
-// tap-outside/Escape already built in); below md it's a swipe-down bottom
-// sheet instead, matching MobileSheet's isMobile-via-matchMedia pattern.
+// `state`, dispatches nothing. Desktop (Section 4c) portals into the
+// board's own empty centre instead of a full-screen modal, so its dimmed
+// backdrop never covers the ring of spaces — falls back to the ordinary
+// full-screen Modal only if the board hasn't published that slot yet
+// (a mount-order race that shouldn't happen in practice, since Board is
+// always mounted well before a space can be clicked). Below md it's a
+// swipe-down bottom sheet instead, matching MobileSheet's own pattern.
 export function PropertyInspector({ state, spaceIndex, onClose, onNavigate }: PropertyInspectorProps) {
   const [isDesktop, setIsDesktop] = useState(true);
   const titleId = useId();
+  const centerSlot = useBoardCenterSlot();
 
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 768px)");
@@ -48,16 +55,17 @@ export function PropertyInspector({ state, spaceIndex, onClose, onNavigate }: Pr
     return () => mq.removeEventListener("change", onChange);
   }, []);
 
-  // Escape-to-close for the mobile sheet — the desktop path renders through
-  // Modal, which already handles this itself.
+  // Escape-to-close — Modal.tsx handles this itself for the fallback path,
+  // but the portal path (and the mobile sheet) render outside Modal, so
+  // this covers those. Harmless if it double-fires alongside Modal's own
+  // handler in the fallback case; onClose is idempotent.
   useEffect(() => {
-    if (isDesktop) return;
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [isDesktop, onClose]);
+  }, [onClose]);
 
   function handleDragEnd(_: unknown, info: PanInfo) {
     if (info.offset.y > DRAG_TO_CLOSE_THRESHOLD || info.velocity.y > 700) onClose();
@@ -66,6 +74,35 @@ export function PropertyInspector({ state, spaceIndex, onClose, onNavigate }: Pr
   const content = <SpaceCard state={state} spaceIndex={spaceIndex} onNavigate={onNavigate} titleId={titleId} />;
 
   if (isDesktop) {
+    if (centerSlot) {
+      return createPortal(
+        <AnimatePresence>
+          <motion.div
+            className="absolute inset-0 z-20 flex items-center justify-center bg-black/75 p-3"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ type: "spring", stiffness: 400, damping: 40 }}
+            onClick={onClose}
+          >
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={titleId}
+              initial={{ opacity: 0, scale: 0.94, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 6 }}
+              transition={{ type: "spring", stiffness: 380, damping: 30 }}
+              onClick={(e) => e.stopPropagation()}
+              className="flex max-h-full w-full max-w-full flex-col gap-4 overflow-y-auto rounded-xl bg-surface p-4 text-xs"
+            >
+              {content}
+            </motion.div>
+          </motion.div>
+        </AnimatePresence>,
+        centerSlot,
+      );
+    }
     return (
       <Modal onClose={onClose} className="max-w-lg" ariaLabelledBy={titleId}>
         {content}

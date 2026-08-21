@@ -5,15 +5,27 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { GOTOJAIL_INDEX, JAIL_INDEX, type Space } from "@/game/board";
 import { MAPS } from "@/game/maps";
 import type { GameState, PlayerState } from "@/game/types";
+import type { ClientAction } from "@/lib/api/client-action";
+import type { PublicGame } from "@/lib/api/public-game";
+import type { PlayerSession } from "@/lib/session";
 import { formatCAD } from "@/lib/money";
 import { COLOR_GROUP_VAR } from "@/lib/board-colors";
 import { PLAYER_TOKEN_COLOR } from "@/lib/tokens";
+import { setBoardCenterSlot } from "@/lib/board-center-slot";
+import { BoardCenterControls } from "./BoardCenterControls";
 import { TokenIcon } from "./TokenIcon";
 
 interface BoardProps {
   state: GameState;
   className?: string;
   onInspect?: (spaceIndex: number) => void;
+  // (Section 4d) Roll/End Turn/Draw Card render inside the board's own
+  // centre now — optional so any test/story rendering Board with just
+  // `state` still works, just without the centre controls.
+  game?: PublicGame;
+  session?: PlayerSession | null;
+  dispatch?: (action: ClientAction) => Promise<{ ok: boolean; reason?: string } | null>;
+  muted?: boolean;
 }
 
 // ============================================================================
@@ -204,7 +216,7 @@ function SpaceBar({ color }: { color: string }) {
   // globals.css) — Board.tsx never checks which theme is active, it just
   // always emits this class and lets the ambient [data-theme] scope decide
   // whether that rule exists.
-  return <div className="board-space-bar h-3 w-full shrink-0" style={{ backgroundColor: color }} />;
+  return <div className="board-space-bar h-[clamp(6px,1.4cqw,14px)] w-full shrink-0" style={{ backgroundColor: color }} />;
 }
 
 function HousePips({ houses, hotel, barColor }: { houses: number; hotel: boolean; barColor: string }) {
@@ -261,13 +273,13 @@ function BoardSpace({
   const bar = barColor ? <SpaceBar color={barColor} /> : null;
   const content = (
     <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-0.5 py-0.5 text-center">
-      <span className="board-space-name line-clamp-2 text-[7px] leading-tight font-semibold tracking-wide text-board-ink uppercase">
+      <span className="board-space-name line-clamp-2 text-[clamp(9px,1.7cqw,15px)] leading-tight font-semibold tracking-wide text-board-ink uppercase">
         {space.name}
       </span>
       {space.type === "property" || space.type === "transport" || space.type === "utility" ? (
-        <span className="board-price text-[7px] tabular-nums text-board-ink/60">{formatCAD(space.price)}</span>
+        <span className="board-price text-[clamp(8px,1.5cqw,13px)] tabular-nums text-board-ink/60">{formatCAD(space.price)}</span>
       ) : space.type === "tax" ? (
-        <span className="board-price text-[7px] tabular-nums text-board-ink/60">{formatCAD(space.amount)}</span>
+        <span className="board-price text-[clamp(8px,1.5cqw,13px)] tabular-nums text-board-ink/60">{formatCAD(space.amount)}</span>
       ) : null}
       {own && !own.mortgaged && space.type === "property" && (
         <HousePips houses={own.houses} hotel={own.hotel} barColor={barColor!} />
@@ -316,7 +328,7 @@ function BoardSpace({
         {edge === "corner" ? (
           <>
             <span className="text-lg leading-none">{cornerIcon(space)}</span>
-            <span className="board-space-name text-[9px] leading-tight font-semibold tracking-wide text-board-ink uppercase">
+            <span className="board-space-name text-[clamp(11px,2.2cqw,18px)] leading-tight font-semibold tracking-wide text-board-ink uppercase">
               {space.name}
             </span>
             {/* Always rendered for the jail corner (a space-type branch,
@@ -398,7 +410,14 @@ function useJailHolds(players: readonly PlayerState[]): Set<string> {
   return holdingIds;
 }
 
-export function Board({ state, className, onInspect }: BoardProps) {
+// (Section 4a) Desktop board size: fills available vertical space up to
+// the sidebar's own width (24rem/384px, see MobileSheet's md:w-96) plus
+// its gap, capped at a sensible max so it doesn't balloon on ultra-wide
+// monitors. Below md this is irrelevant — w-full there just fills the
+// viewport (Section 4e), so the md: prefix keeps it scoped to desktop.
+const DESKTOP_MAX_WIDTH = "md:max-w-[min(calc(100vh-120px),calc(100vw-464px),900px)]";
+
+export function Board({ state, className, onInspect, game, session, dispatch, muted }: BoardProps) {
   const spaces = MAPS[state.settings.mapId].spaces;
   const playersBySpace = new Map<number, PlayerState[]>();
   for (const player of state.players) {
@@ -413,11 +432,11 @@ export function Board({ state, className, onInspect }: BoardProps) {
 
   return (
     <div
-      className={`relative mx-auto w-full max-w-[760px] rounded-[28px] p-3 sm:p-6 ${className ?? ""}`}
+      className={`relative mx-auto w-full max-w-[760px] ${DESKTOP_MAX_WIDTH} rounded-[28px] p-3 sm:p-6 ${className ?? ""}`}
       style={{ background: "radial-gradient(circle at 50% 42%, var(--color-canvas) 0%, var(--color-canvas-edge) 100%)" }}
     >
       <div
-        className="board-paper-texture relative aspect-square w-full overflow-hidden rounded-[2px] bg-board"
+        className="board-paper-texture relative aspect-square w-full overflow-hidden rounded-[2px] bg-board [container-type:inline-size]"
         style={{ boxShadow: "var(--board-shadow)" }}
       >
         <div
@@ -435,15 +454,29 @@ export function Board({ state, className, onInspect }: BoardProps) {
               highlighted={highlightIndex === space.index}
             />
           ))}
-          {/* The 9x9 interior isn't covered by any space — without this,
-              it falls through to the grid's own background (bg-board-line,
+          {/* The 9x9 interior isn't covered by any space — it hosts the
+              primary turn controls now (Section 4d), and would otherwise
+              fall through to the grid's own background (bg-board-line,
               used elsewhere purely to draw the hairline rules in the gaps
-              between cells). That reads as a barely-there tan-on-tan
-              mismatch in the modern theme, but heritage's near-black line
-              colour turns the entire centre into a solid void. Filling it
-              explicitly is the correct fix in both themes, not a
-              heritage-only patch. */}
-          <div className="bg-board" style={{ gridRow: "2 / 11", gridColumn: "2 / 11" }} aria-hidden="true" />
+              between cells) — a barely-there tan-on-tan mismatch in the
+              modern theme, but heritage's near-black line colour turns
+              the whole centre into a solid void without an explicit fill. */}
+          <div
+            ref={setBoardCenterSlot}
+            className="relative flex items-center justify-center overflow-hidden bg-board"
+            style={{ gridRow: "2 / 11", gridColumn: "2 / 11" }}
+          >
+            <div className="absolute inset-0 z-10 flex items-center justify-center">
+              {game && dispatch && (
+                <BoardCenterControls game={game} session={session ?? null} dispatch={dispatch} muted={muted ?? true} />
+              )}
+            </div>
+            {/* Portal target for Section 4c: card reveals, the property
+                inspector, and any tooltip/toast that would otherwise cover
+                the ring of spaces render here instead (see
+                useBoardCenterSlot) — stacked above the default centre
+                controls via z-20. */}
+          </div>
         </div>
 
         <div className="pointer-events-none absolute inset-0 z-30">
