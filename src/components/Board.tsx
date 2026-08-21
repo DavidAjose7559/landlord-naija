@@ -13,6 +13,7 @@ import { TokenIcon } from "./TokenIcon";
 interface BoardProps {
   state: GameState;
   className?: string;
+  onInspect?: (spaceIndex: number) => void;
 }
 
 // ============================================================================
@@ -199,9 +200,11 @@ function barGoesFirst(edge: Edge): boolean {
 function BoardSpace({
   space,
   state,
+  onInspect,
 }: {
   space: Space;
   state: GameState;
+  onInspect?: (spaceIndex: number) => void;
 }) {
   const { row, col } = gridPosition(space.index);
   const edge = edgeForIndex(space.index);
@@ -230,12 +233,23 @@ function BoardSpace({
     </div>
   );
 
+  function inspect() {
+    onInspect?.(space.index);
+  }
+
   return (
     <div
       role="gridcell"
       tabIndex={0}
-      aria-label={label}
-      className={`relative flex overflow-hidden bg-board outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+      aria-label={`${label}. Press Enter for details.`}
+      onClick={inspect}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          inspect();
+        }
+      }}
+      className={`relative flex cursor-pointer overflow-hidden bg-board outline-none focus-visible:ring-2 focus-visible:ring-accent ${
         edge === "corner" ? "items-center justify-center" : ""
       }`}
       style={{ gridRow: row, gridColumn: col }}
@@ -300,7 +314,7 @@ function cornerIcon(space: Space): string {
   }
 }
 
-export function Board({ state, className }: BoardProps) {
+export function Board({ state, className, onInspect }: BoardProps) {
   const spaces = MAPS[state.settings.mapId].spaces;
   const playersBySpace = new Map<number, PlayerState[]>();
   for (const player of state.players) {
@@ -318,7 +332,7 @@ export function Board({ state, className }: BoardProps) {
       <div className="board-paper-texture relative aspect-square w-full overflow-hidden rounded-[2px] bg-board shadow-[0_24px_60px_-18px_rgba(0,0,0,0.7)]">
         <div role="grid" aria-label="Game board" className="grid h-full w-full grid-cols-11 grid-rows-11 gap-px bg-board-line">
           {spaces.map((space) => (
-            <BoardSpace key={space.index} space={space} state={state} />
+            <BoardSpace key={space.index} space={space} state={state} onInspect={onInspect} />
           ))}
         </div>
 

@@ -16,6 +16,7 @@ interface PlayerPanelProps {
   game: PublicGame;
   session: PlayerSession | null;
   dispatch: (action: ClientAction) => Promise<{ ok: boolean; reason?: string } | null>;
+  onInspect?: (spaceIndex: number) => void;
 }
 
 interface OwnedSpaceInfo {
@@ -62,7 +63,7 @@ function groupByColor(owned: OwnedSpaceInfo[]): Map<string, OwnedSpaceInfo[]> {
   return groups;
 }
 
-export function PlayerPanel({ game, session, dispatch }: PlayerPanelProps) {
+export function PlayerPanel({ game, session, dispatch, onInspect }: PlayerPanelProps) {
   const [busySpace, setBusySpace] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -104,7 +105,9 @@ export function PlayerPanel({ game, session, dispatch }: PlayerPanelProps) {
               <Money cents={player.cashCents} className="font-semibold text-ink" />
             </div>
 
-            {isMe && !player.bankrupt && <Portfolio game={game} player={player} onAct={act} busySpace={busySpace} />}
+            {isMe && !player.bankrupt && (
+              <Portfolio game={game} player={player} onAct={act} busySpace={busySpace} onInspect={onInspect} />
+            )}
           </div>
         );
       })}
@@ -118,11 +121,13 @@ function Portfolio({
   player,
   onAct,
   busySpace,
+  onInspect,
 }: {
   game: PublicGame;
   player: PlayerState;
   onAct: (action: ClientAction, spaceIndex: number) => void;
   busySpace: number | null;
+  onInspect?: (spaceIndex: number) => void;
 }) {
   const owned = ownedSpaces(game, player.id);
   if (owned.length === 0) {
@@ -145,10 +150,15 @@ function Portfolio({
           </div>
           {spaces.map((space) => (
             <div key={space.index} className="flex items-center gap-2 text-xs">
-              <span className={`flex-1 text-ink ${space.mortgaged ? "text-muted line-through" : ""}`}>
+              <button
+                type="button"
+                onClick={() => onInspect?.(space.index)}
+                aria-label={`Inspect ${space.name}`}
+                className={`flex-1 truncate text-left text-ink hover:underline ${space.mortgaged ? "text-muted line-through" : ""}`}
+              >
                 {space.name}
                 {space.hotel ? " · hotel" : space.houses > 0 ? ` · ${space.houses}h` : ""}
-              </span>
+              </button>
               {space.houseCost !== null && !space.mortgaged && (
                 <>
                   {(() => {

@@ -172,3 +172,38 @@ dev server with the new seed-state harness.
     guaranteed (`EventLog` dedupes incoming rows by `seq`; `useGame`
     replaces state wholesale rather than accumulating it).
 
+- Added a property inspector — click or tap any board space (or a property
+  name in a player's portfolio) to open a read-only card: full rent ladder,
+  current applicable rent highlighted with a reason, mortgage/build costs,
+  owner, region overview strip, or a plain-language explainer for tax/GO/
+  jail/free-parking/card spaces. No action buttons, no state mutation. No
+  gaps found against the spec — nothing pre-existing to compare against
+  (grepped for any prior "inspector"/property-card component; found none).
+  `computePropertyRent`/`computeTransportRent`/`computeUtilityRent`/
+  `ownsFullUnmortgagedGroup`/`ownedPropertyIndexesInGroup` were exported
+  from `engine.ts` (previously module-private) specifically so the card
+  imports the exact functions `resolveLanding` charges rent with, rather
+  than re-deriving the number — the new engine.test.ts describe block
+  asserts each one's return value against what `reduce()` actually charges
+  a player landing there, for every property tier plus transport/utility
+  ownership counts. Live-verified in two browser tabs: a non-current player
+  opened a full monopoly's card, a mortgaged property, an unowned transport,
+  and an unowned utility mid-opponent's-turn with zero effect on server
+  state (confirmed via a direct API read before/after — turnPhase, both
+  players' cash, and the full ownership map were byte-identical); real
+  keyboard Tab+Enter opened a card; Escape and tap-outside both closed it;
+  the mobile viewport correctly switched to a bottom sheet with the same
+  content. Modal.tsx picked up `role="dialog"`/`aria-modal`/Escape-to-close
+  as a small, generically-useful side effect — every modal in the app gets
+  Escape now, not just this one. **Not verified**: the mobile sheet's
+  swipe-down-to-close gesture. Two different synthetic-drag approaches
+  (CDP's `left_click_drag` and a manually-dispatched multi-step
+  `PointerEvent` sequence) both failed to trigger Framer Motion's
+  `onDragEnd`, most likely because its gesture recognizer requires trusted,
+  OS-originated pointer events that scripted/CDP input doesn't reliably
+  produce — not something specific to this component, since the drag
+  implementation directly mirrors `MobileSheet.tsx`'s already-shipped,
+  real-user-tested drag-to-resize handle (same `drag="y"` +
+  `dragConstraints` + `onDragEnd`-threshold pattern). Tap-outside-to-close
+  works on the mobile sheet as a confirmed alternative dismissal path.
+

@@ -1,17 +1,29 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
+import { useEffect } from "react";
 
 interface ModalProps {
   onClose?: () => void;
   children: React.ReactNode;
   className?: string;
+  ariaLabel?: string;
+  ariaLabelledBy?: string;
 }
 
 // Every modal overlay in the app renders through this — Framer Motion
 // spring transitions for the backdrop and panel (Section G: "no linear
 // easing anywhere" for panel transitions), not a CSS fade/ease.
-export function Modal({ onClose, children, className = "" }: ModalProps) {
+export function Modal({ onClose, children, className = "", ariaLabel, ariaLabelledBy }: ModalProps) {
+  useEffect(() => {
+    if (!onClose) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose?.();
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
   return (
     <AnimatePresence>
       <motion.div
@@ -23,6 +35,10 @@ export function Modal({ onClose, children, className = "" }: ModalProps) {
         onClick={onClose}
       >
         <motion.div
+          role="dialog"
+          aria-modal="true"
+          aria-label={ariaLabel}
+          aria-labelledby={ariaLabelledBy}
           initial={{ opacity: 0, scale: 0.94, y: 12 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.96, y: 8 }}

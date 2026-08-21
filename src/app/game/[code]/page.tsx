@@ -11,6 +11,7 @@ import { MobileSheet } from "@/components/MobileSheet";
 import { PlayerPanel } from "@/components/PlayerPanel";
 import { TradePanel } from "@/components/TradePanel";
 import { WinnerScreen } from "@/components/WinnerScreen";
+import { PropertyInspector } from "@/components/PropertyInspector";
 import { MAPS } from "@/game/maps";
 import { useGame } from "@/hooks/useGame";
 
@@ -21,6 +22,7 @@ export default function BoardPage() {
   const { game, loading, error, session, pending, reconnecting, dispatch, simulateDisconnect } = useGame(roomCode);
 
   const [muted, setMuted] = useState(true);
+  const [inspectedIndex, setInspectedIndex] = useState<number | null>(null);
 
   useEffect(() => {
     if (game && game.status === "lobby") {
@@ -90,7 +92,7 @@ export default function BoardPage() {
         </>
       )}
 
-      <PlayerPanel game={game} session={session} dispatch={dispatch} />
+      <PlayerPanel game={game} session={session} dispatch={dispatch} onInspect={setInspectedIndex} />
       <EventLog
         gameId={game.id}
         players={game.state.players}
@@ -104,11 +106,20 @@ export default function BoardPage() {
 
   return (
     <div className="flex min-h-screen flex-col gap-8 bg-canvas px-4 py-8 pb-40 md:flex-row md:items-start md:justify-center md:gap-10 md:px-8 md:pb-8">
-      <Board state={game.state} className="md:sticky md:top-8" />
+      <Board state={game.state} className="md:sticky md:top-8" onInspect={setInspectedIndex} />
 
       <MobileSheet>{panelContent}</MobileSheet>
 
       {game.status === "finished" && game.state.winnerPlayerId && <WinnerScreen game={game} roomCode={roomCode} />}
+
+      {inspectedIndex !== null && (
+        <PropertyInspector
+          state={game.state}
+          spaceIndex={inspectedIndex}
+          onClose={() => setInspectedIndex(null)}
+          onNavigate={setInspectedIndex}
+        />
+      )}
     </div>
   );
 }

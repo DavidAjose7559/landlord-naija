@@ -2,7 +2,16 @@ import { describe, expect, it } from "vitest";
 import { MAPS } from "./maps";
 import type { PropertySpace } from "./board";
 import { rollFor } from "./dice";
-import { computeDebtReliefPlan, netWorth, netWorthBreakdown, reduce, type GameAction } from "./engine";
+import {
+  computeDebtReliefPlan,
+  computePropertyRent,
+  computeTransportRent,
+  computeUtilityRent,
+  netWorth,
+  netWorthBreakdown,
+  reduce,
+  type GameAction,
+} from "./engine";
 import { DEFAULT_SETTINGS, type GameState, type PlayerState, type PlayerToken } from "./types";
 
 const BOARD = MAPS.naija.spaces;
@@ -169,6 +178,108 @@ describe("rent", () => {
     const expectedRent = 7 * 4 * 100; // dice total * 4x multiplier, in cents
     expect(next.players[0].cashCents).toBe(50_000 - expectedRent);
     expect(next.players[1].cashCents).toBe(STARTING_CASH + expectedRent);
+  });
+});
+
+// The property inspector (src/components/PropertyInspector.tsx) imports
+// computePropertyRent/computeTransportRent/computeUtilityRent directly and
+// calls them with the exact same arguments resolveLanding does, rather than
+// re-deriving rent itself — these tests exist to prove that channel is
+// trustworthy: whatever the exported function returns is provably what
+// reduce() actually charges a player who lands there, for every tier these
+// three space types can be in. If the inspector and the engine ever drifted
+// apart, it could only be because one of these assertions started failing.
+describe("computeXRent (as imported by the property inspector) matches what reduce() actually charges", () => {
+  it("property: full monopoly, 0 houses — doubled", () => {
+    const owner = makePlayer("owner", 1, { cashCents: 0 });
+    const payer = makePlayer("payer", 0, { position: 1, cashCents: 50_000 });
+    const state = makeState([payer, owner], {
+      ownership: {
+        6: { ownerId: "owner", houses: 0, hotel: false, mortgaged: false },
+        8: { ownerId: "owner", houses: 0, hotel: false, mortgaged: false },
+        9: { ownerId: "owner", houses: 0, hotel: false, mortgaged: false },
+      },
+    });
+    const space = BOARD[6] as PropertySpace;
+    const displayedRent = computePropertyRent(state, space, state.ownership[6]);
+
+    const { state: next } = reduce(state, { type: "ROLL", playerId: "payer", d1: 2, d2: 3 }); // 1 -> 6
+
+    expect(displayedRent).toBe(space.rent[0] * 2);
+    expect(next.players[1].cashCents).toBe(displayedRent); // owner started at 0, gained exactly this
+    expect(50_000 - next.players[0].cashCents).toBe(displayedRent); // payer paid exactly this
+  });
+
+  it("property: 2 houses, no monopoly — not doubled", () => {
+    const owner = makePlayer("owner", 1, { cashCents: 0 });
+    const payer = makePlayer("payer", 0, { position: 1, cashCents: 50_000 });
+    const state = makeState([payer, owner], {
+      ownership: {
+        6: { ownerId: "owner", houses: 2, hotel: false, mortgaged: false },
+        // group not complete — 8/9 unowned, so no full-set doubling applies
+      },
+    });
+    const space = BOARD[6] as PropertySpace;
+    const displayedRent = computePropertyRent(state, space, state.ownership[6]);
+
+    const { state: next } = reduce(state, { type: "ROLL", playerId: "payer", d1: 2, d2: 3 }); // 1 -> 6
+
+    expect(displayedRent).toBe(space.rent[2]);
+    expect(50_000 - next.players[0].cashCents).toBe(displayedRent);
+  });
+
+  it("property: hotel", () => {
+    const owner = makePlayer("owner", 1, { cashCents: 0 });
+    // Hotel-tier rent on even a cheap property comfortably exceeds $500 —
+    // give the payer enough cash that this charges immediately rather than
+    // deferring to a pending debt (a real, different code path, not what
+    // this test is about).
+    const payer = makePlayer("payer", 0, { position: 1, cashCents: 100_000 });
+    const state = makeState([payer, owner], {
+      ownership: { 6: { ownerId: "owner", houses: 0, hotel: true, mortgaged: false } },
+    });
+    const space = BOARD[6] as PropertySpace;
+    const displayedRent = computePropertyRent(state, space, state.ownership[6]);
+
+    const { state: next } = reduce(state, { type: "ROLL", playerId: "payer", d1: 2, d2: 3 }); // 1 -> 6
+
+    expect(displayedRent).toBe(space.rent[5]);
+    expect(100_000 - next.players[0].cashCents).toBe(displayedRent);
+  });
+
+  it("transport: 3 owned", () => {
+    const owner = makePlayer("owner", 1, { cashCents: 0 });
+    const payer = makePlayer("payer", 0, { position: 20, cashCents: 50_000 }); // Detty December (free)
+    const state = makeState([payer, owner], {
+      ownership: {
+        5: { ownerId: "owner", houses: 0, hotel: false, mortgaged: false },
+        15: { ownerId: "owner", houses: 0, hotel: false, mortgaged: false },
+        25: { ownerId: "owner", houses: 0, hotel: false, mortgaged: false }, // landing here, 3rd hub owned
+      },
+    });
+    const displayedRent = computeTransportRent(state, "owner");
+
+    const { state: next } = reduce(state, { type: "ROLL", playerId: "payer", d1: 3, d2: 2 }); // 20 -> 25 (Murtala Muhammed Airport)
+
+    expect(displayedRent).toBe(12_000); // TRANSPORT_RENT[2] — $120, the 3-owned tier
+    expect(50_000 - next.players[0].cashCents).toBe(displayedRent);
+  });
+
+  it("utility: 2 owned — 10x the dice", () => {
+    const owner = makePlayer("owner", 1, { cashCents: 0 });
+    const payer = makePlayer("payer", 0, { position: 21, cashCents: 50_000 });
+    const state = makeState([payer, owner], {
+      ownership: {
+        12: { ownerId: "owner", houses: 0, hotel: false, mortgaged: false },
+        28: { ownerId: "owner", houses: 0, hotel: false, mortgaged: false }, // landing here, both utilities owned
+      },
+    });
+
+    const { state: next } = reduce(state, { type: "ROLL", playerId: "payer", d1: 3, d2: 4 }); // 21 -> 28
+    const displayedRent = computeUtilityRent(next, "owner"); // computed against post-roll state, same as the inspector would read it live
+
+    expect(displayedRent).toBe(7 * 10 * 100);
+    expect(50_000 - next.players[0].cashCents).toBe(displayedRent);
   });
 });
 

@@ -30,9 +30,9 @@ import type {
   TurnPhase,
 } from "./types";
 
-const JAIL_FINE = dollars(50);
-const MAX_JAIL_TURNS = 3;
-const MAX_DOUBLES = 3;
+export const JAIL_FINE = dollars(50);
+export const MAX_JAIL_TURNS = 3;
+export const MAX_DOUBLES = 3;
 const MAX_HOUSES_IN_BANK = 32;
 const MAX_HOTELS_IN_BANK = 12;
 const BOARD_SIZE = 40;
@@ -227,13 +227,16 @@ function isPausingPhase(state: GameState): boolean {
   );
 }
 
-function ownedPropertyIndexesInGroup(state: GameState, color: ColorGroup): number[] {
+// Exported for the property inspector (src/components/PropertyInspector.tsx)
+// — it needs to know a region's full membership to render "owner holds 2 of
+// 3" and the region-overview strip, without duplicating this lookup.
+export function ownedPropertyIndexesInGroup(state: GameState, color: ColorGroup): number[] {
   return boardOf(state)
     .filter((s): s is PropertySpace => s.type === "property" && s.color === color)
     .map((s) => s.index);
 }
 
-function ownsFullUnmortgagedGroup(state: GameState, ownerId: string, color: ColorGroup): boolean {
+export function ownsFullUnmortgagedGroup(state: GameState, ownerId: string, color: ColorGroup): boolean {
   return ownedPropertyIndexesInGroup(state, color).every((idx) => {
     const own = state.ownership[idx];
     return own !== undefined && own.ownerId === ownerId && !own.mortgaged;
@@ -251,7 +254,12 @@ function getMortgageableSpace(
   return undefined;
 }
 
-function computePropertyRent(state: GameState, space: PropertySpace, own: PropertyOwnership): number {
+// Exported (along with computeTransportRent/computeUtilityRent below) so
+// the property inspector can display "the rent this would charge right
+// now" using the exact same function resolveLanding calls to actually
+// charge it — importing this rather than re-deriving the number is what
+// structurally guarantees the two can never drift apart.
+export function computePropertyRent(state: GameState, space: PropertySpace, own: PropertyOwnership): number {
   const tierIndex = own.hotel ? 5 : own.houses;
   let rent = space.rent[tierIndex];
   if (
@@ -264,7 +272,7 @@ function computePropertyRent(state: GameState, space: PropertySpace, own: Proper
   return rent;
 }
 
-function computeTransportRent(state: GameState, ownerId: string): number {
+export function computeTransportRent(state: GameState, ownerId: string): number {
   const ownedCount = TRANSPORT_INDEXES.filter((idx) => {
     const own = state.ownership[idx];
     return own !== undefined && own.ownerId === ownerId && !own.mortgaged;
@@ -272,7 +280,7 @@ function computeTransportRent(state: GameState, ownerId: string): number {
   return TRANSPORT_RENT[Math.max(0, ownedCount - 1)] ?? 0;
 }
 
-function computeUtilityRent(state: GameState, ownerId: string): number {
+export function computeUtilityRent(state: GameState, ownerId: string): number {
   const ownedCount = UTILITY_INDEXES.filter((idx) => {
     const own = state.ownership[idx];
     return own !== undefined && own.ownerId === ownerId && !own.mortgaged;
