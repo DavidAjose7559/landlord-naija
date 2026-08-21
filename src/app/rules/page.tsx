@@ -42,6 +42,71 @@ export default function RulesPage() {
         <p>Landing exactly on or passing GO pays you $200. Detty December does nothing — no jackpot pot to land on.</p>
       </Section>
 
+      <Section title="Maps">
+        <p>Every map uses the same 40-space layout and rules — only the names and flavour change:</p>
+        <p>
+          <span className="font-medium text-ink">Naija Edition</span> — Lagos, Abuja, Enugu, Port Harcourt, Ibadan,
+          Kano and beyond, with Owambe and Village People cards.{" "}
+          <span className="font-medium text-ink">World Tour</span> — each colour group is its own country
+          (🇳🇬🇬🇭🇿🇦🇧🇷🇬🇧🇫🇷🇨🇦🇺🇸).{" "}
+          <span className="font-medium text-ink">Canada</span> — provinces and territories, Toronto anchoring the
+          top group. <span className="font-medium text-ink">Classic</span> — the familiar board, generically
+          renamed.
+        </p>
+      </Section>
+
+      <Section title="Room settings">
+        <p>The host configures these from the lobby before starting — they&apos;re locked in for the rest of the game:</p>
+        <ul className="flex flex-col gap-2">
+          <li>
+            <span className="font-medium text-ink">Starting cash</span> — how much every player begins with.
+          </li>
+          <li>
+            <span className="font-medium text-ink">Randomize player order</span> — shuffle turn order at start
+            instead of using join order.
+          </li>
+          <li>
+            <span className="font-medium text-ink">Double rent on full set</span> — see Buying and rent above.
+          </li>
+          <li>
+            <span className="font-medium text-ink">Free parking cash</span> — when on, tax and fine payments pool up
+            on Detty December and whoever lands there collects it, instead of the money just vanishing to the bank.
+          </li>
+          <li>
+            <span className="font-medium text-ink">Auction on decline</span> — when on, a property nobody buys goes
+            to auction among the other players instead of staying with the bank.
+          </li>
+          <li>
+            <span className="font-medium text-ink">Collect rent while jailed</span> — when off, an owner sitting in
+            Kirikiri doesn&apos;t collect rent from anyone landing on their properties.
+          </li>
+          <li>
+            <span className="font-medium text-ink">Mortgage enabled</span> — when off, the Mortgage button
+            doesn&apos;t appear anywhere; it&apos;s not available as a way to raise cash.
+          </li>
+          <li>
+            <span className="font-medium text-ink">Even build</span> — see Building houses above.
+          </li>
+          <li>
+            <span className="font-medium text-ink">Allow manual bankruptcy</span> — when on, any player can declare
+            bankruptcy voluntarily at any time, not only when they can&apos;t cover a debt.
+          </li>
+          <li>
+            <span className="font-medium text-ink">Bankruptcy transfers assets</span> — when on, a bankrupt
+            player&apos;s remaining properties go to their creditor. When off, they return to the bank unowned and
+            unimproved, up for grabs again.
+          </li>
+          <li>
+            <span className="font-medium text-ink">Trading enabled</span> — when off, trading is turned off for the
+            whole room; no Propose Trade button anywhere.
+          </li>
+          <li>
+            <span className="font-medium text-ink">Turn time limit</span> — when set above 0 seconds, a player who
+            goes silent can be force-ended by anyone else once the clock runs out.
+          </li>
+        </ul>
+      </Section>
+
       <Section title="Buying and rent">
         <p>
           Land on an unowned property, transport, or utility and you can buy it at the listed price, or pass and

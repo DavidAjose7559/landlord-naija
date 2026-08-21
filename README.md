@@ -18,6 +18,23 @@ and Framer Motion.
 - **No accounts.** Joining a game hands your browser a secret `client_token`, stored in
   `localStorage` keyed by room code, that proves your seat on reconnect.
 
+## Game features
+
+- **Four maps** (`src/game/maps/`) — Naija Edition (Lagos, Abuja, Enugu, Port Harcourt, Ibadan,
+  Kano...), World Tour (one country per colour group), Canada, and Classic — same 40-space layout
+  and rules underneath, only names and card flavour differ. Naija Edition's two card decks are
+  **Owambe** (mostly good news) and **Village People** (chaos).
+- **Configurable rooms.** The host sets starting cash, whether rent doubles on a full colour-group
+  monopoly, free parking cash, auctions, mortgaging, even-build, manual bankruptcy, whether
+  bankruptcy transfers assets to the creditor or returns them to the bank, trading, and a turn time
+  limit — all frozen once the game starts. See `/rules` in-app for what each one does.
+- **Trading.** Any player can propose a cash/property/jail-free-card trade with any other player at
+  any time; the recipient can accept, decline, or counter, and the full negotiation thread is
+  visible to both sides.
+- **Debt resolution.** A player who can't cover a debt gets an explicit panel — mortgage/sell
+  proactively, or use "Help me raise it" for a server-computed plan (bare properties before houses)
+  — rather than being auto-liquidated.
+
 ## Project structure
 
 ```
