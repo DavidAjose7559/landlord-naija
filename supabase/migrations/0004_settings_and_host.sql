@@ -88,6 +88,14 @@ begin
 end;
 $$;
 
+-- Same rename restriction as apply_game_action below: CREATE OR REPLACE
+-- FUNCTION won't let a parameter change name even when its type doesn't
+-- change, so if the live signature is still 0002's original
+-- p_owambe_deck/p_village_deck (0003's rename apparently didn't stick),
+-- redeclaring with p_treasure_deck/p_surprise_deck needs an explicit drop
+-- first. Harmless no-op if the live signature already matches.
+drop function if exists start_game(uuid, jsonb, jsonb, jsonb);
+
 create or replace function start_game(
   p_game_id uuid,
   p_new_state jsonb,
