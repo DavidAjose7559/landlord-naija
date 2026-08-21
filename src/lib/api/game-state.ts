@@ -2,8 +2,9 @@ import "server-only";
 
 import type { Deck } from "@/game/board";
 import { DECKS, shuffleDeck } from "@/game/cards";
-import type { GameState, GameStatus, PlayerState } from "@/game/types";
+import type { GameState, GameStatus, PlayerState, TurnPhase } from "@/game/types";
 import { supabaseAdmin } from "@/lib/supabase/server";
+import type { PublicGame } from "./public-game";
 import { ApiError } from "./errors";
 import { secureRandom } from "./rng";
 
@@ -15,7 +16,7 @@ export interface GameRow {
   serverSeed: string | null; // only non-null once status === "finished"
   rollIndex: number;
   currentPlayerIndex: number;
-  turnPhase: string;
+  turnPhase: TurnPhase;
   doublesCount: number;
   state: GameState;
   createdAt: string;
@@ -30,7 +31,7 @@ interface GamesPublicRow {
   server_seed: string | null;
   roll_index: number;
   current_player_index: number;
-  turn_phase: string;
+  turn_phase: TurnPhase;
   doubles_count: number;
   state: GameState;
   created_at: string;
@@ -69,8 +70,9 @@ export async function loadGameByRoomCode(roomCode: string): Promise<GameRow> {
   return mapGameRow(data as GamesPublicRow);
 }
 
-export function gameRowToPublicJson(row: GameRow) {
+export function gameRowToPublicJson(row: GameRow): PublicGame {
   return {
+    id: row.id,
     roomCode: row.roomCode,
     status: row.status,
     serverSeedHash: row.serverSeedHash,

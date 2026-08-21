@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { GENESIS_HASH, hashChain, rollFor } from "@/game/dice";
 import { reduce, type GameAction, type GameEvent } from "@/game/engine";
+import { actionRequestSchema, type ClientAction } from "@/lib/api/client-action";
 import {
   callRpc,
   drawNextCardId,
@@ -19,56 +19,6 @@ import { ApiError, errorResponse } from "@/lib/api/errors";
 import { checkRateLimit } from "@/lib/api/rate-limit";
 import { parseJsonBody, parseRoomCode } from "@/lib/api/validate";
 import { supabaseAdmin } from "@/lib/supabase/server";
-
-const spaceIndexSchema = z.number().int().min(0).max(39);
-
-const tradeOfferSchema = z
-  .object({
-    cashCents: z.number().int().nonnegative(),
-    spaceIndexes: z.array(spaceIndexSchema),
-    jailFreeCards: z.number().int().nonnegative(),
-  })
-  .strict();
-
-// Mirrors GameAction, but stripped of everything the server must own:
-// playerId (always the authenticated caller, never client-supplied),
-// dice (the server rolls them), cardId (the server draws it), and any
-// cash/position anywhere. START_GAME isn't here at all — that only
-// happens through POST .../start, with its own host/min-players checks.
-const clientActionSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("ROLL") }).strict(),
-  z.object({ type: z.literal("BUY") }).strict(),
-  z.object({ type: z.literal("DECLINE_BUY") }).strict(),
-  z.object({ type: z.literal("PAY_RENT") }).strict(),
-  z.object({ type: z.literal("DRAW_CARD") }).strict(),
-  z.object({ type: z.literal("BUILD_HOUSE"), spaceIndex: spaceIndexSchema }).strict(),
-  z.object({ type: z.literal("SELL_HOUSE"), spaceIndex: spaceIndexSchema }).strict(),
-  z.object({ type: z.literal("MORTGAGE"), spaceIndex: spaceIndexSchema }).strict(),
-  z.object({ type: z.literal("UNMORTGAGE"), spaceIndex: spaceIndexSchema }).strict(),
-  z.object({ type: z.literal("PAY_JAIL_FINE") }).strict(),
-  z.object({ type: z.literal("USE_JAIL_FREE") }).strict(),
-  z.object({ type: z.literal("END_TURN") }).strict(),
-  z.object({ type: z.literal("DECLARE_BANKRUPT") }).strict(),
-  z
-    .object({
-      type: z.literal("PROPOSE_TRADE"),
-      toPlayerId: z.string().uuid(),
-      give: tradeOfferSchema,
-      receive: tradeOfferSchema,
-    })
-    .strict(),
-  z.object({ type: z.literal("ACCEPT_TRADE"), tradeId: z.number().int() }).strict(),
-  z.object({ type: z.literal("DECLINE_TRADE"), tradeId: z.number().int() }).strict(),
-]);
-
-type ClientAction = z.infer<typeof clientActionSchema>;
-
-const actionRequestSchema = z
-  .object({
-    clientToken: z.string().min(1),
-    action: clientActionSchema,
-  })
-  .strict();
 
 // Trade actions are inherently between two players and aren't turn-locked
 // by design (see engine.ts); neither is DECLARE_BANKRUPT — a player can
