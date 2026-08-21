@@ -170,7 +170,7 @@ function Portfolio({
                   )}
                 </>
               )}
-              {!space.mortgaged && space.houses === 0 && !space.hotel && (
+              {!space.mortgaged && space.houses === 0 && !space.hotel && game.state.settings.mortgageEnabled && (
                 <button
                   type="button"
                   disabled={busySpace === space.index}

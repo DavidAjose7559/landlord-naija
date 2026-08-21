@@ -21,7 +21,7 @@ import { POST as startGame } from "@/app/api/games/[code]/start/route";
 import { POST as postAction } from "@/app/api/games/[code]/action/route";
 import { POST as proposeTrade } from "@/app/api/games/[code]/trades/route";
 import { POST as acceptTrade } from "@/app/api/games/[code]/trades/[tradeId]/accept/route";
-import { POST as counterTrade } from "@/app/api/games/[code]/trades/[tradeId]/counter/route";
+import { POST as counterTrade } from "@/app/api/games/[code]/trades/[tradeId]/negotiate/route";
 import { POST as declineTrade } from "@/app/api/games/[code]/trades/[tradeId]/decline/route";
 import { POST as cancelTrade } from "@/app/api/games/[code]/trades/[tradeId]/cancel/route";
 import { GET as getVerify } from "@/app/api/games/[code]/verify/route";
@@ -670,7 +670,7 @@ describe("trades", () => {
     const { tradeId } = await proposeRes.json();
 
     const counterRes = await counterTrade(
-      postJson(`http://test/api/games/${setup.roomCode}/trades/${tradeId}/counter`, {
+      postJson(`http://test/api/games/${setup.roomCode}/trades/${tradeId}/negotiate`, {
         clientToken: setup.guest.clientToken,
         offer: { ...EMPTY, cashCents: 500 },
         request: { ...EMPTY, spaceIndexes: [1] },
@@ -746,7 +746,7 @@ describe("trades", () => {
     // Round 1 already exists; rounds 2-10 are 9 more counters.
     for (let round = 2; round <= 10; round++) {
       const res = await counterTrade(
-        postJson(`http://test/api/games/${setup.roomCode}/trades/${currentId}/counter`, {
+        postJson(`http://test/api/games/${setup.roomCode}/trades/${currentId}/negotiate`, {
           clientToken: clientTokens[round % 2],
           offer: EMPTY,
           request: EMPTY,
@@ -758,7 +758,7 @@ describe("trades", () => {
     }
 
     const overCap = await counterTrade(
-      postJson(`http://test/api/games/${setup.roomCode}/trades/${currentId}/counter`, {
+      postJson(`http://test/api/games/${setup.roomCode}/trades/${currentId}/negotiate`, {
         clientToken: clientTokens[11 % 2],
         offer: EMPTY,
         request: EMPTY,

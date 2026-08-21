@@ -165,7 +165,10 @@ export function TradePanel({ game, session }: TradePanelProps) {
     resetProposeForm();
   }
 
-  if (!me || me.bankrupt) return null;
+  // tradingEnabled is frozen at game start (see UPDATE_SETTINGS), so if it's
+  // off no trade could ever have been proposed in the first place — nothing
+  // in myOpenThreads to preserve either way.
+  if (!me || me.bankrupt || !game.state.settings.tradingEnabled) return null;
 
   const activeThreadKey = openThreadKey && threads.has(openThreadKey) ? openThreadKey : null;
 
@@ -517,7 +520,7 @@ function NegotiationModal({
                 type="button"
                 disabled={busy}
                 onClick={async () => {
-                  const ok = await act("counter", { offer: counterOffer, request: counterRequest });
+                  const ok = await act("negotiate", { offer: counterOffer, request: counterRequest });
                   if (ok) {
                     setCounterOffer(null);
                     setCounterRequest(null);
