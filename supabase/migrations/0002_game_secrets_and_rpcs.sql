@@ -42,6 +42,36 @@ comment on table game_secrets is
 alter table game_secrets enable row level security;
 -- Deliberately no policies — service role only.
 
+-- ============================================================================
+-- games_public: recomputed against the new shape *before* games.server_seed
+-- is dropped below — the old (0001) view definition still references that
+-- column directly, and Postgres won't let you drop a column a view depends
+-- on. Recreating the view here first switches its dependency to
+-- game_secrets instead, which frees the column up to drop. server_seed is
+-- still masked until the game finishes, now via a left join.
+-- ============================================================================
+
+create or replace view games_public
+  with (security_barrier = true)
+as
+select
+  g.id,
+  g.room_code,
+  g.status,
+  g.server_seed_hash,
+  case when g.status = 'finished' then gs.server_seed else null end as server_seed,
+  g.roll_index,
+  g.current_player_index,
+  g.turn_phase,
+  g.doubles_count,
+  g.state,
+  g.created_at,
+  g.updated_at
+from games g
+left join game_secrets gs on gs.game_id = g.id;
+
+grant select on games_public to anon;
+
 -- Backfill any games.server_seed values still there (from 0001 having
 -- already run), then drop that column. Guarded exactly like the
 -- players.client_token migration in 0001.
@@ -71,36 +101,6 @@ create policy "anon can read games" on games
   for select
   to anon
   using (true);
-
--- ============================================================================
--- games_public: recomputed against the new shape. server_seed now comes
--- from game_secrets via a left join, still masked until the game finishes.
--- Client code should keep reading this view (or the games realtime
--- channel, now that it works) rather than joining game_secrets directly —
--- that join only resolves through this view because it's evaluated with
--- the view owner's privileges against a table anon has no policies on.
--- ============================================================================
-
-create or replace view games_public
-  with (security_barrier = true)
-as
-select
-  g.id,
-  g.room_code,
-  g.status,
-  g.server_seed_hash,
-  case when g.status = 'finished' then gs.server_seed else null end as server_seed,
-  g.roll_index,
-  g.current_player_index,
-  g.turn_phase,
-  g.doubles_count,
-  g.state,
-  g.created_at,
-  g.updated_at
-from games g
-left join game_secrets gs on gs.game_id = g.id;
-
-grant select on games_public to anon;
 
 -- ============================================================================
 -- RPC functions. Every write the API layer makes that touches more than
