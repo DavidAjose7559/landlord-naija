@@ -16,6 +16,10 @@
 alter table games add column if not exists settings jsonb not null default '{}'::jsonb;
 alter table games add column if not exists host_player_id uuid references players(id) on delete set null;
 
+-- CREATE OR REPLACE VIEW requires every existing column to keep its exact
+-- name and ordinal position — Postgres reads an insertion in the middle of
+-- the column list as a rename of whatever was pushed into that slot (here,
+-- state -> settings), which it refuses. New columns have to go at the end.
 create or replace view games_public
   with (security_barrier = true)
 as
@@ -29,11 +33,11 @@ select
   g.current_player_index,
   g.turn_phase,
   g.doubles_count,
-  g.settings,
-  g.host_player_id,
   g.state,
   g.created_at,
-  g.updated_at
+  g.updated_at,
+  g.settings,
+  g.host_player_id
 from games g
 left join game_secrets gs on gs.game_id = g.id;
 

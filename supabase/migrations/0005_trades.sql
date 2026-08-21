@@ -115,6 +115,16 @@ begin
 end;
 $$;
 
+-- CREATE OR REPLACE FUNCTION only replaces a function whose declared
+-- parameter list matches exactly — adding p_accepted_trade_id as a new
+-- 13th parameter makes this a different signature from the 12-param
+-- version 0002/0004 defined, so without an explicit drop first, Postgres
+-- creates a second overload instead of replacing the original (which then
+-- makes every unqualified reference below ambiguous).
+drop function if exists apply_game_action(
+  uuid, int, jsonb, text, int, int, text, int, jsonb, jsonb, jsonb, jsonb
+);
+
 create or replace function apply_game_action(
   p_game_id uuid,
   p_expected_roll_index int,
