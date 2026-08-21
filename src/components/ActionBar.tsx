@@ -10,6 +10,7 @@ import type { PublicGame } from "@/lib/api/public-game";
 import { formatCAD } from "@/lib/money";
 import type { PlayerSession } from "@/lib/session";
 import { supabase } from "@/lib/supabase/client";
+import { Modal } from "./Modal";
 
 interface ActionBarProps {
   game: PublicGame;
@@ -23,8 +24,8 @@ interface DrawnCard {
 }
 
 const DECK_STYLE: Record<Deck, string> = {
-  treasure: "bg-[#3a2a05] border-2 border-[#D4A017] text-[#F5D98B]",
-  surprise: "bg-[#3a0a0a] border-2 border-[#8B1A1A] text-[#F0A5A5]",
+  treasure: "bg-gold/15 border-2 border-gold text-gold",
+  surprise: "bg-magenta/15 border-2 border-magenta text-magenta",
 };
 
 export function ActionBar({ game, session, dispatch }: ActionBarProps) {
@@ -338,40 +339,38 @@ function DebtPanel({
       </div>
 
       {showPlan && plan && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="flex w-full max-w-sm flex-col gap-3 rounded-2xl bg-surface p-6">
-            <h3 className="text-base font-bold text-ink">Raise {formatCAD(shortfall)} automatically?</h3>
-            <p className="text-sm text-ink">
-              This will{" "}
-              {plan.operations
-                .map((op) =>
-                  op.type === "mortgage" ? `mortgage ${spaces[op.spaceIndex].name}` : `sell a house on ${spaces[op.spaceIndex].name}`,
-                )
-                .join(", ")}
-              .
-            </p>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={async () => {
-                  const result = await act({ type: "RAISE_DEBT_HELP" });
-                  if (result?.ok) setShowPlan(false);
-                }}
-                className="flex-1 rounded-full bg-accent px-4 py-2.5 text-sm font-semibold text-accent-foreground disabled:opacity-40"
-              >
-                Confirm
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowPlan(false)}
-                className="flex-1 rounded-full bg-surface-2 px-4 py-2.5 text-sm font-semibold text-ink"
-              >
-                Cancel
-              </button>
-            </div>
+        <Modal onClose={() => setShowPlan(false)} className="max-w-sm gap-3">
+          <h3 className="text-base font-bold text-ink">Raise {formatCAD(shortfall)} automatically?</h3>
+          <p className="text-sm text-ink">
+            This will{" "}
+            {plan.operations
+              .map((op) =>
+                op.type === "mortgage" ? `mortgage ${spaces[op.spaceIndex].name}` : `sell a house on ${spaces[op.spaceIndex].name}`,
+              )
+              .join(", ")}
+            .
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={async () => {
+                const result = await act({ type: "RAISE_DEBT_HELP" });
+                if (result?.ok) setShowPlan(false);
+              }}
+              className="flex-1 rounded-full bg-accent px-4 py-2.5 text-sm font-semibold text-accent-foreground disabled:opacity-40"
+            >
+              Confirm
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowPlan(false)}
+              className="flex-1 rounded-full bg-surface-2 px-4 py-2.5 text-sm font-semibold text-ink"
+            >
+              Cancel
+            </button>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

@@ -184,6 +184,18 @@ function HousePips({ houses, hotel, barColor }: { houses: number; hotel: boolean
   );
 }
 
+// "Saturated colour bars flush at each space's outer edge" (Section G) —
+// the outer edge for each screen edge is a different physical side of the
+// cell (bottom row -> screen-bottom, left column -> screen-left, etc), so
+// which end of the pre-rotation flex column the bar sits at has to vary:
+// full-bleed (no padding) at the "top" end for the top row (its outward
+// edge is already screen-up, unrotated per the earlier rotation decision)
+// and at the "bottom" end for bottom/left/right, whose rotation/geometry
+// puts pre-rotation-bottom on their respective outward screen edge.
+function barGoesFirst(edge: Edge): boolean {
+  return edge === "top";
+}
+
 function BoardSpace({
   space,
   state,
@@ -201,19 +213,36 @@ function BoardSpace({
 
   const label = describeSpace(space, state.ownership, state.players);
 
+  const bar = barColor ? <SpaceBar color={barColor} /> : null;
+  const content = (
+    <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-0.5 py-0.5 text-center">
+      <span className="line-clamp-2 text-[7px] leading-tight font-semibold tracking-wide text-board-ink uppercase">
+        {space.name}
+      </span>
+      {space.type === "property" || space.type === "transport" || space.type === "utility" ? (
+        <span className="text-[7px] tabular-nums text-board-ink/60">{formatCAD(space.price)}</span>
+      ) : space.type === "tax" ? (
+        <span className="text-[7px] tabular-nums text-board-ink/60">{formatCAD(space.amount)}</span>
+      ) : null}
+      {own && !own.mortgaged && space.type === "property" && (
+        <HousePips houses={own.houses} hotel={own.hotel} barColor={barColor!} />
+      )}
+    </div>
+  );
+
   return (
     <div
       role="gridcell"
       tabIndex={0}
       aria-label={label}
-      className={`relative flex overflow-hidden bg-surface outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+      className={`relative flex overflow-hidden bg-board outline-none focus-visible:ring-2 focus-visible:ring-accent ${
         edge === "corner" ? "items-center justify-center" : ""
       }`}
       style={{ gridRow: row, gridColumn: col }}
     >
       {own?.mortgaged && (
         <div
-          className="pointer-events-none absolute inset-0 z-10 bg-canvas/60"
+          className="pointer-events-none absolute inset-0 z-10 bg-board/70"
           style={{
             backgroundImage:
               "linear-gradient(to top right, transparent calc(50% - 1px), var(--color-danger) 50%, transparent calc(50% + 1px))",
@@ -222,33 +251,32 @@ function BoardSpace({
       )}
 
       <div
-        className={`flex h-full w-full flex-col ${edge === "corner" ? "items-center justify-center gap-1 p-1 text-center" : "justify-between p-1"}`}
+        className={`flex h-full w-full flex-col ${edge === "corner" ? "items-center justify-center gap-1 p-1 text-center" : ""}`}
         style={rotation ? { transform: `rotate(${rotation}deg)` } : undefined}
       >
         {edge === "corner" ? (
           <>
             <span className="text-lg leading-none">{cornerIcon(space)}</span>
-            <span className="text-[9px] leading-tight font-semibold text-ink">{space.name}</span>
+            <span className="text-[9px] leading-tight font-semibold tracking-wide text-board-ink uppercase">
+              {space.name}
+            </span>
+          </>
+        ) : barGoesFirst(edge) ? (
+          <>
+            {bar}
+            {content}
           </>
         ) : (
           <>
-            {barColor && <SpaceBar color={barColor} />}
-            <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-0.5 text-center">
-              <span className="line-clamp-2 text-[8px] leading-tight font-medium text-ink">{space.name}</span>
-              {space.type === "property" || space.type === "transport" || space.type === "utility" ? (
-                <span className="text-[8px] tabular-nums text-muted">{formatCAD(space.price)}</span>
-              ) : space.type === "tax" ? (
-                <span className="text-[8px] tabular-nums text-muted">{formatCAD(space.amount)}</span>
-              ) : null}
-            </div>
-            {own && !own.mortgaged && (space.type === "property" ? <HousePips houses={own.houses} hotel={own.hotel} barColor={barColor!} /> : null)}
+            {content}
+            {bar}
           </>
         )}
       </div>
 
       {owner && (
         <span
-          className="absolute top-0.5 right-0.5 z-20 h-2 w-2 rounded-full ring-1 ring-canvas"
+          className="absolute top-0.5 right-0.5 z-20 h-2 w-2 rounded-full ring-1 ring-board"
           style={{ backgroundColor: PLAYER_TOKEN_COLOR[owner.token] }}
           aria-hidden="true"
         />
@@ -283,23 +311,28 @@ export function Board({ state, className }: BoardProps) {
   }
 
   return (
-    <div className={`relative mx-auto aspect-square w-full max-w-[720px] ${className ?? ""}`}>
-      <div role="grid" aria-label="Game board" className="grid h-full w-full grid-cols-11 grid-rows-11 gap-px bg-canvas">
-        {spaces.map((space) => (
-          <BoardSpace key={space.index} space={space} state={state} />
-        ))}
-      </div>
+    <div
+      className={`relative mx-auto w-full max-w-[760px] rounded-[28px] p-3 sm:p-6 ${className ?? ""}`}
+      style={{ background: "radial-gradient(circle at 50% 42%, var(--color-canvas) 0%, var(--color-canvas-edge) 100%)" }}
+    >
+      <div className="board-paper-texture relative aspect-square w-full overflow-hidden rounded-[2px] bg-board shadow-[0_24px_60px_-18px_rgba(0,0,0,0.7)]">
+        <div role="grid" aria-label="Game board" className="grid h-full w-full grid-cols-11 grid-rows-11 gap-px bg-board-line">
+          {spaces.map((space) => (
+            <BoardSpace key={space.index} space={space} state={state} />
+          ))}
+        </div>
 
-      <div className="pointer-events-none absolute inset-0 z-30">
-        {state.players
-          .filter((p) => !p.bankrupt)
-          .map((player) => {
-            const sameSpace = playersBySpace.get(player.position) ?? [];
-            const offsetIndex = sameSpace.findIndex((p) => p.id === player.id);
-            return (
-              <PlayerToken key={player.id} player={player} offsetIndex={offsetIndex} offsetCount={sameSpace.length} />
-            );
-          })}
+        <div className="pointer-events-none absolute inset-0 z-30">
+          {state.players
+            .filter((p) => !p.bankrupt)
+            .map((player) => {
+              const sameSpace = playersBySpace.get(player.position) ?? [];
+              const offsetIndex = sameSpace.findIndex((p) => p.id === player.id);
+              return (
+                <PlayerToken key={player.id} player={player} offsetIndex={offsetIndex} offsetCount={sameSpace.length} />
+              );
+            })}
+        </div>
       </div>
     </div>
   );

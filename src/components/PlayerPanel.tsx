@@ -83,9 +83,9 @@ export function PlayerPanel({ game, session, dispatch }: PlayerPanelProps) {
         return (
           <div
             key={player.id}
-            className={`flex flex-col gap-3 rounded-2xl px-4 py-3 ${isCurrent ? "bg-surface-2" : "bg-surface"} ${
-              player.bankrupt ? "opacity-40" : ""
-            }`}
+            className={`flex flex-col gap-3 rounded-2xl px-4 py-3 ${
+              isCurrent ? "border border-white/8 bg-surface-2" : "bg-surface"
+            } ${player.bankrupt ? "opacity-40" : ""}`}
           >
             <div className="flex items-center gap-3">
               <TokenIcon token={player.token} className="text-xl" />

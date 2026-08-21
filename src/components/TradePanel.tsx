@@ -6,6 +6,7 @@ import type { PublicGame } from "@/lib/api/public-game";
 import { formatCAD } from "@/lib/money";
 import type { PlayerSession } from "@/lib/session";
 import { supabase } from "@/lib/supabase/client";
+import { Modal } from "./Modal";
 import { TokenIcon } from "./TokenIcon";
 
 interface TradePanelProps {
@@ -182,7 +183,7 @@ export function TradePanel({ game, session }: TradePanelProps) {
                 key={trade.id}
                 type="button"
                 onClick={() => setOpenThreadKey([...threads.entries()].find(([, list]) => list.includes(trade))?.[0] ?? null)}
-                className="flex items-center justify-between rounded-2xl bg-surface-2 px-4 py-2.5 text-left text-sm text-ink hover:bg-white/10"
+                className="flex items-center justify-between rounded-2xl border border-white/8 bg-surface-2 px-4 py-2.5 text-left text-sm text-ink hover:bg-white/10"
               >
                 <span className="flex items-center gap-1.5">
                   {counterparty ? (
@@ -213,57 +214,55 @@ export function TradePanel({ game, session }: TradePanelProps) {
       )}
 
       {proposeTargetId !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="flex max-h-[85vh] w-full max-w-md flex-col gap-4 overflow-y-auto rounded-2xl bg-surface p-6">
-            <h2 className="text-lg font-bold text-ink">Propose a trade</h2>
+        <Modal onClose={resetProposeForm}>
+          <h2 className="text-lg font-bold text-ink">Propose a trade</h2>
 
-            <label className="flex flex-col gap-1.5 text-xs font-medium text-muted uppercase">
-              Trade with
-              <select
-                value={proposeTargetId}
-                onChange={(e) => setProposeTargetId(e.target.value)}
-                className="rounded-lg bg-surface-2 px-3 py-2 text-sm font-normal text-ink normal-case"
-              >
-                {others.map((p) => (
-                  <option key={p.id} value={p.id} disabled={hasOpenThreadWith(p.id)}>
-                    {p.name}
-                    {hasOpenThreadWith(p.id) ? " (negotiation open)" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
+          <label className="flex flex-col gap-1.5 text-xs font-medium text-muted uppercase">
+            Trade with
+            <select
+              value={proposeTargetId}
+              onChange={(e) => setProposeTargetId(e.target.value)}
+              className="rounded-lg bg-surface-2 px-3 py-2 text-sm font-normal text-ink normal-case"
+            >
+              {others.map((p) => (
+                <option key={p.id} value={p.id} disabled={hasOpenThreadWith(p.id)}>
+                  {p.name}
+                  {hasOpenThreadWith(p.id) ? " (negotiation open)" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
 
-            <OfferEditor label="You give" game={game} ownerId={session.playerId} jailFreeMax={me.jailFreeCards} offer={give} onChange={setGive} />
-            <OfferEditor
-              label="You receive"
-              game={game}
-              ownerId={proposeTargetId}
-              jailFreeMax={game.state.players.find((p) => p.id === proposeTargetId)?.jailFreeCards ?? 0}
-              offer={receive}
-              onChange={setReceive}
-            />
+          <OfferEditor label="You give" game={game} ownerId={session.playerId} jailFreeMax={me.jailFreeCards} offer={give} onChange={setGive} />
+          <OfferEditor
+            label="You receive"
+            game={game}
+            ownerId={proposeTargetId}
+            jailFreeMax={game.state.players.find((p) => p.id === proposeTargetId)?.jailFreeCards ?? 0}
+            offer={receive}
+            onChange={setReceive}
+          />
 
-            {error && <p className="text-xs text-danger">{error}</p>}
+          {error && <p className="text-xs text-danger">{error}</p>}
 
-            <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={handlePropose}
-                className="flex-1 rounded-full bg-accent px-4 py-2.5 text-sm font-semibold text-accent-foreground disabled:opacity-40"
-              >
-                {busy ? "Proposing…" : "Propose"}
-              </button>
-              <button
-                type="button"
-                onClick={resetProposeForm}
-                className="rounded-full bg-surface-2 px-4 py-2.5 text-sm font-semibold text-ink"
-              >
-                Cancel
-              </button>
-            </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={handlePropose}
+              className="flex-1 rounded-full bg-accent px-4 py-2.5 text-sm font-semibold text-accent-foreground disabled:opacity-40"
+            >
+              {busy ? "Proposing…" : "Propose"}
+            </button>
+            <button
+              type="button"
+              onClick={resetProposeForm}
+              className="rounded-full bg-surface-2 px-4 py-2.5 text-sm font-semibold text-ink"
+            >
+              Cancel
+            </button>
           </div>
-        </div>
+        </Modal>
       )}
 
       {activeThreadKey && (
@@ -306,7 +305,7 @@ function OfferEditor({
   }
 
   return (
-    <fieldset className="flex flex-col gap-2 rounded-xl bg-surface-2 p-3">
+    <fieldset className="flex flex-col gap-2 rounded-xl border border-white/8 bg-surface-2 p-3">
       <legend className="px-1 text-xs font-semibold tracking-wide text-muted uppercase">{label}</legend>
 
       <label className="flex items-center justify-between gap-2 text-xs text-ink">
@@ -472,21 +471,20 @@ function NegotiationModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="flex max-h-[85vh] w-full max-w-md flex-col gap-4 overflow-y-auto rounded-2xl bg-surface p-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold text-ink">Negotiation</h2>
-          <button type="button" onClick={onClose} className="text-xs text-muted hover:text-ink">
-            Close
-          </button>
-        </div>
+    <Modal onClose={onClose}>
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-bold text-ink">Negotiation</h2>
+        <button type="button" onClick={onClose} className="text-xs text-muted hover:text-ink">
+          Close
+        </button>
+      </div>
 
         <div className="flex flex-col gap-3">
           {rounds.map((round, i) => {
             const fromPlayer = game.state.players.find((p) => p.id === round.from_player_id);
             const previous = i > 0 ? rounds[i - 1] : null;
             return (
-              <div key={round.id} className="flex flex-col gap-1 rounded-xl bg-surface-2 p-3">
+              <div key={round.id} className="flex flex-col gap-1 rounded-xl border border-white/8 bg-surface-2 p-3">
                 <span className="text-[11px] font-semibold tracking-wide text-muted uppercase">
                   Round {round.round} · {fromPlayer?.name ?? "Someone"} proposed
                 </span>
@@ -588,7 +586,6 @@ function NegotiationModal({
             </div>
           )
         )}
-      </div>
-    </div>
+    </Modal>
   );
 }

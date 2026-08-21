@@ -7,6 +7,7 @@ import { ActionBar } from "@/components/ActionBar";
 import { Board } from "@/components/Board";
 import { DiceRoller } from "@/components/DiceRoller";
 import { EventLog } from "@/components/EventLog";
+import { MobileSheet } from "@/components/MobileSheet";
 import { PlayerPanel } from "@/components/PlayerPanel";
 import { TradePanel } from "@/components/TradePanel";
 import { WinnerScreen } from "@/components/WinnerScreen";
@@ -19,7 +20,6 @@ export default function BoardPage() {
   const router = useRouter();
   const { game, loading, error, session, pending, reconnecting, dispatch } = useGame(roomCode);
 
-  const [sheetOpen, setSheetOpen] = useState(false);
   const [muted, setMuted] = useState(true);
 
   useEffect(() => {
@@ -94,23 +94,7 @@ export default function BoardPage() {
     <div className="flex min-h-screen flex-col gap-8 bg-canvas px-4 py-8 pb-40 md:flex-row md:items-start md:justify-center md:gap-10 md:px-8 md:pb-8">
       <Board state={game.state} className="md:sticky md:top-8" />
 
-      <div
-        className={`fixed inset-x-0 bottom-0 z-40 overflow-hidden rounded-t-3xl bg-surface transition-[max-height] duration-300 ease-out md:static md:z-auto md:max-h-none md:w-96 md:shrink-0 md:overflow-visible md:rounded-none md:bg-transparent md:transition-none ${
-          sheetOpen ? "max-h-[80vh]" : "max-h-32"
-        }`}
-      >
-        <button
-          type="button"
-          onClick={() => setSheetOpen((v) => !v)}
-          aria-expanded={sheetOpen}
-          className="flex w-full justify-center py-2 md:hidden"
-        >
-          <span className="h-1 w-10 rounded-full bg-white/20" />
-        </button>
-        <div className="max-h-[calc(80vh-2rem)] overflow-y-auto px-4 pb-8 md:max-h-none md:overflow-visible md:px-0 md:pb-0">
-          {panelContent}
-        </div>
-      </div>
+      <MobileSheet>{panelContent}</MobileSheet>
 
       {game.status === "finished" && game.state.winnerPlayerId && <WinnerScreen game={game} roomCode={roomCode} />}
     </div>

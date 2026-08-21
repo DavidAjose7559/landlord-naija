@@ -6,6 +6,7 @@ import { MAP_LIST, MAPS } from "@/game/maps";
 import type { GameSettings } from "@/game/types";
 import type { PublicGame } from "@/lib/api/public-game";
 import { formatCAD } from "@/lib/money";
+import { Modal } from "./Modal";
 
 interface SettingsPanelProps {
   game: PublicGame;
@@ -267,42 +268,40 @@ export function SettingsPanel({ game, isHost, roomCode, clientToken }: SettingsP
       {error && <p className="text-xs text-danger">{error}</p>}
 
       {mapPickerOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="flex max-h-[85vh] w-full max-w-md flex-col gap-3 overflow-y-auto rounded-2xl bg-surface p-6">
-            <h3 className="text-lg font-bold text-ink">Choose a map</h3>
-            {MAP_LIST.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => {
-                  void patch({ mapId: m.id });
-                  setMapPickerOpen(false);
-                }}
-                className={`flex flex-col gap-1 rounded-xl px-4 py-3 text-left transition-colors ${
-                  m.id === settings.mapId ? "bg-accent/20 ring-1 ring-accent" : "bg-surface-2 hover:bg-white/10"
-                }`}
-              >
-                <span className="flex items-center gap-2 text-sm font-semibold text-ink">
-                  <span className="text-lg">{m.flagEmoji}</span>
-                  {m.name}
-                </span>
-                <span className="text-xs text-muted">{m.tagline}</span>
-                <span className="flex flex-wrap gap-1 pt-1 text-[11px] text-muted">
-                  {m.regions.map((r) => (
-                    <span key={r.id}>{r.flagEmoji ?? ""} {r.name}</span>
-                  ))}
-                </span>
-              </button>
-            ))}
+        <Modal onClose={() => setMapPickerOpen(false)}>
+          <h3 className="text-lg font-bold text-ink">Choose a map</h3>
+          {MAP_LIST.map((m) => (
             <button
+              key={m.id}
               type="button"
-              onClick={() => setMapPickerOpen(false)}
-              className="mt-2 self-end rounded-full bg-surface-2 px-4 py-1.5 text-xs font-semibold text-ink"
+              onClick={() => {
+                void patch({ mapId: m.id });
+                setMapPickerOpen(false);
+              }}
+              className={`flex flex-col gap-1 rounded-xl px-4 py-3 text-left transition-colors ${
+                m.id === settings.mapId ? "bg-accent/20 ring-1 ring-accent" : "border border-white/8 bg-surface-2 hover:bg-white/10"
+              }`}
             >
-              Close
+              <span className="flex items-center gap-2 text-sm font-semibold text-ink">
+                <span className="text-lg">{m.flagEmoji}</span>
+                {m.name}
+              </span>
+              <span className="text-xs text-muted">{m.tagline}</span>
+              <span className="flex flex-wrap gap-1 pt-1 text-[11px] text-muted">
+                {m.regions.map((r) => (
+                  <span key={r.id}>{r.flagEmoji ?? ""} {r.name}</span>
+                ))}
+              </span>
             </button>
-          </div>
-        </div>
+          ))}
+          <button
+            type="button"
+            onClick={() => setMapPickerOpen(false)}
+            className="mt-2 self-end rounded-full bg-surface-2 px-4 py-1.5 text-xs font-semibold text-ink"
+          >
+            Close
+          </button>
+        </Modal>
       )}
     </div>
   );

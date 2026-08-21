@@ -125,7 +125,10 @@ export function WinnerScreen({ game, roomCode }: WinnerScreenProps) {
         {standings.map((s, i) => {
           const expanded = expandedId === s.player.id;
           return (
-            <div key={s.player.id} className="rounded-2xl bg-surface">
+            <div
+              key={s.player.id}
+              className={`rounded-2xl border bg-surface-2 ${i === 0 ? "border-accent/50" : "border-white/8"}`}
+            >
               <button
                 type="button"
                 onClick={() => setExpandedId(expanded ? null : s.player.id)}
