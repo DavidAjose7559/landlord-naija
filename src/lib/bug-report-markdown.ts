@@ -42,6 +42,14 @@ function formatDiagnostics(row: BugReportRow): string {
     .join("\n");
 }
 
+// "1. clicked Roll (game view) 2. opened property card: Lekki Phase 1 ..."
+// — the exact click/focus trail leading up to the report, oldest first.
+// This is the piece that turns "it broke" into an actual repro.
+function formatBreadcrumbs(row: BugReportRow): string {
+  if (row.snapshot.breadcrumbs.length === 0) return "(none captured)";
+  return row.snapshot.breadcrumbs.map((b, i) => `${i + 1}. ${b.label} (${b.route})`).join("\n");
+}
+
 function formatTrades(game: BugReportGameSnapshot): string {
   if (game.openTrades.length === 0) return "(no open trades)";
   return game.openTrades
@@ -77,6 +85,7 @@ export function formatBugReportMarkdown(row: BugReportRow): string {
 
 **Reporter:** ${snapshot.reporter.name} (${reporterTag})
 **Commit:** ${row.commitSha ?? "unknown"}
+**Screenshot:** ${row.screenshotPath ? "attached — view inline on the /bugs page" : "none"}
 **${reproHint(row, game)}**
 
 ### What happened
@@ -90,6 +99,9 @@ ${game ? formatEvents(game) : "(no active game)"}
 
 ### Console/network errors captured this session
 ${formatDiagnostics(row)}
+
+### Click trail leading up to this report
+${formatBreadcrumbs(row)}
 
 ### Client
 - user agent: ${snapshot.client.userAgent}

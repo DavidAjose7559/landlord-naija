@@ -75,6 +75,7 @@ export interface FakeDb {
   events: any[];
   trades: any[];
   bugReports: any[];
+  messages: any[];
 }
 
 function emptyDb(): FakeDb {
@@ -87,15 +88,37 @@ function emptyDb(): FakeDb {
     events: [],
     trades: [],
     bugReports: [],
+    messages: [],
   };
 }
 
 export class FakeSupabaseAdmin {
   db: FakeDb = emptyDb();
+  storedFiles: Map<string, unknown> = new Map();
 
   reset(): void {
     this.db = emptyDb();
+    this.storedFiles.clear();
   }
+
+  // Minimal stand-in for the two Storage calls bug-reports.ts makes
+  // (upload on submit, createSignedUrl when the /bugs page reads reports
+  // back) — enough to exercise the real upload/sign code paths in tests
+  // without a real bucket.
+  storage = {
+    from: (bucket: string) => ({
+      upload: async (path: string, body: unknown): Promise<FakeResult<{ path: string } | null>> => {
+        this.storedFiles.set(`${bucket}/${path}`, body);
+        return { data: { path }, error: null };
+      },
+      createSignedUrl: async (path: string): Promise<FakeResult<{ signedUrl: string } | null>> => {
+        if (!this.storedFiles.has(`${bucket}/${path}`)) {
+          return { data: null, error: { message: "object not found" } };
+        }
+        return { data: { signedUrl: `https://fake-storage.test/${bucket}/${path}` }, error: null };
+      },
+    }),
+  };
 
   from(table: string): FakeQueryBuilder<any> {
     if (table === "games_public") {
@@ -128,6 +151,7 @@ export class FakeSupabaseAdmin {
       events: this.db.events,
       trades: this.db.trades,
       bug_reports: this.db.bugReports,
+      messages: this.db.messages,
     };
     const rows = tableMap[table];
     if (!rows) throw new Error(`fake supabase: unknown table "${table}"`);
@@ -161,6 +185,8 @@ export class FakeSupabaseAdmin {
           return this.createBugReport(args);
         case "set_bug_report_resolved":
           return this.setBugReportResolved(args);
+        case "post_message":
+          return this.postMessage(args);
         default:
           return { data: null, error: { message: `unknown rpc ${fn}` } };
       }
@@ -391,6 +417,7 @@ export class FakeSupabaseAdmin {
       snapshot: args.p_snapshot,
       resolved: false,
       created_at: new Date().toISOString(),
+      screenshot_path: args.p_screenshot_path ?? null,
     });
     return { data: null, error: null };
   }
@@ -398,6 +425,18 @@ export class FakeSupabaseAdmin {
   private setBugReportResolved(args: Record<string, any>): FakeResult<null> {
     const report = this.db.bugReports.find((r) => r.id === args.p_id);
     if (report) report.resolved = args.p_resolved;
+    return { data: null, error: null };
+  }
+
+  private postMessage(args: Record<string, any>): FakeResult<null> {
+    const id = this.db.messages.length + 1;
+    this.db.messages.push({
+      id,
+      game_id: args.p_game_id,
+      player_id: args.p_player_id,
+      body: args.p_body,
+      created_at: new Date().toISOString(),
+    });
     return { data: null, error: null };
   }
 }

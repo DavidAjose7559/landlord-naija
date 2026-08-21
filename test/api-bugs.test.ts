@@ -14,6 +14,8 @@ import { POST as startGame } from "@/app/api/games/[code]/start/route";
 import { GET as getGame } from "@/app/api/games/[code]/route";
 import { POST as postBug, GET as getBugs } from "@/app/api/bugs/route";
 import { PATCH as patchBug } from "@/app/api/bugs/[id]/route";
+import { loadBugReports } from "@/lib/api/bug-reports";
+import { formatBugReportMarkdown } from "@/lib/bug-report-markdown";
 
 const fakeAdmin = supabaseAdmin as unknown as FakeSupabaseAdmin;
 
@@ -64,6 +66,7 @@ function bugPayload(overrides: Partial<Record<string, unknown>> = {}) {
     commitSha: "deadbeef",
     client: CLIENT_ENV,
     diagnostics: [],
+    breadcrumbs: [],
     ...overrides,
   };
 }
@@ -191,6 +194,85 @@ describe("POST /api/bugs", () => {
     const res = await postBug(postJson("http://test/api/bugs", bugPayload({ roomCode, description: "" })));
     expect(res.status).toBe(400);
   });
+
+  it("stores the breadcrumb trail in the snapshot", async () => {
+    const { roomCode, host } = await createJoinAndStart();
+    const breadcrumbs = [
+      { timestamp: 1000, label: "clicked Roll", route: "/game/AAAAAA" },
+      { timestamp: 1500, label: "clicked Mortgage — disabled (Sell the houses first.)", route: "/game/AAAAAA" },
+    ];
+
+    const res = await postBug(
+      postJson("http://test/api/bugs", bugPayload({ roomCode, clientToken: host.clientToken, breadcrumbs })),
+    );
+    expect(res.status).toBe(201);
+    expect(fakeAdmin.db.bugReports[0].snapshot.breadcrumbs).toEqual(breadcrumbs);
+  });
+
+  it("uploads a screenshot and records its object path", async () => {
+    const { roomCode, host } = await createJoinAndStart();
+    const screenshotBase64 = Buffer.from("fake-jpeg-bytes").toString("base64");
+
+    const res = await postBug(
+      postJson("http://test/api/bugs", bugPayload({ roomCode, clientToken: host.clientToken, screenshotBase64 })),
+    );
+    expect(res.status).toBe(201);
+    const { id } = await res.json();
+
+    const row = fakeAdmin.db.bugReports[0];
+    expect(row.screenshot_path).toBe(`${id}.jpg`);
+    expect(fakeAdmin.storedFiles.has(`bug-screenshots/${id}.jpg`)).toBe(true);
+
+    // and it round-trips through loadBugReports as a signed URL, not the
+    // raw object path
+    const [loaded] = await loadBugReports();
+    expect(loaded.screenshotUrl).toBe(`https://fake-storage.test/bug-screenshots/${id}.jpg`);
+  });
+
+  it("still submits successfully when the screenshot is oversized — the report just has no screenshot", async () => {
+    const { roomCode, host } = await createJoinAndStart();
+    const oversized = Buffer.alloc(3 * 1024 * 1024, 1).toString("base64");
+
+    const res = await postBug(
+      postJson("http://test/api/bugs", bugPayload({ roomCode, clientToken: host.clientToken, screenshotBase64: oversized })),
+    );
+    expect(res.status).toBe(201);
+    expect(fakeAdmin.db.bugReports[0].screenshot_path).toBeNull();
+  });
+
+  it("submits successfully with no screenshot at all", async () => {
+    const { roomCode, host } = await createJoinAndStart();
+    const res = await postBug(
+      postJson("http://test/api/bugs", bugPayload({ roomCode, clientToken: host.clientToken })),
+    );
+    expect(res.status).toBe(201);
+    expect(fakeAdmin.db.bugReports[0].screenshot_path).toBeNull();
+  });
+});
+
+describe("loadBugReports — backward compatibility", () => {
+  it("normalizes a pre-existing row whose snapshot has no breadcrumbs field at all", async () => {
+    // Simulates a row written before this app added breadcrumbs — the
+    // stored snapshot simply doesn't have the key, not even as null.
+    fakeAdmin.db.bugReports.push({
+      id: "legacy-row",
+      game_id: null,
+      reporter_player_id: null,
+      room_code: null,
+      severity: "annoying",
+      description: "an old report from before breadcrumbs existed",
+      commit_sha: null,
+      snapshot: { path: "/", game: null, reporter: { playerId: null, name: "Anonymous", position: null }, client: CLIENT_ENV, diagnostics: [] },
+      resolved: false,
+      created_at: new Date().toISOString(),
+      screenshot_path: null,
+    });
+
+    const [loaded] = await loadBugReports();
+    expect(loaded.snapshot.breadcrumbs).toEqual([]);
+    // and formatting it doesn't throw either
+    expect(() => formatBugReportMarkdown(loaded)).not.toThrow();
+  });
 });
 
 describe("GET /api/bugs", () => {
@@ -216,6 +298,28 @@ describe("GET /api/bugs", () => {
     const text = await res.text();
     expect(text).toContain("board renders blank");
     expect(text).toContain("Repro hint:");
+  });
+
+  it("includes the numbered click trail in the markdown", async () => {
+    const { roomCode } = await createJoinAndStart();
+    await postBug(
+      postJson(
+        "http://test/api/bugs",
+        bugPayload({
+          roomCode,
+          description: "board renders blank",
+          breadcrumbs: [
+            { timestamp: 1000, label: "clicked Roll", route: "/game/AAAAAA" },
+            { timestamp: 1500, label: "opened property card: Lekki Phase 1", route: "/game/AAAAAA" },
+          ],
+        }),
+      ),
+    );
+
+    const res = await getBugs(new Request("http://test/api/bugs?secret=test-admin-secret&unresolved=true"));
+    const text = await res.text();
+    expect(text).toContain("1. clicked Roll (/game/AAAAAA)");
+    expect(text).toContain("2. opened property card: Lekki Phase 1 (/game/AAAAAA)");
   });
 });
 

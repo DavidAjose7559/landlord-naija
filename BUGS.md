@@ -502,3 +502,118 @@ fallback. Opened the map picker, confirmed all four modern maps render
 visually identical thumbnails and Original's renders distinctly
 (sage-tinted, black-bordered) with the gold Heritage badge.
 
+## 9. In-game chat, and richer bug reports (screenshot + click trail)
+
+Branch `feat/chat-and-richer-bugs` (not merged to `main` — see the PR/branch
+notes). Two features:
+
+**Chat.** A "Chat" tab next to the event log (`LogChatTabs.tsx`), same
+panel in both the desktop side column and the mobile bottom sheet since
+both already render the same `panelContent` tree. Own messages are
+right-aligned, everyone else's left-aligned; a row of one-tap reactions
+(👍😂😭💀🔥) posts as an ordinary message. `POST /api/games/[code]/chat`
+is deliberately outside `GameAction`/the rules engine entirely — it only
+ever inserts into a new standalone `messages` table (migration
+`0009_messages.sql`), never calls `apply_game_action`, so there's no path
+from a message to a state mutation. Available in the lobby too (no
+`game.status` gate at all — matches "any turn, any phase" including
+pre-game). A spectator can read but not post.
+
+**Real bug found while wiring this up, not specific to chat:**
+`checkRateLimit`'s in-memory store is a single map shared across the
+whole process, keyed purely by whatever string a caller passes. The
+action route and the bug-report route were BOTH already calling it with
+the bare `clientToken` as the key — meaning a burst of game actions (the
+action route's 20-per-10s limit) and a bug report from the same player
+(the bug-report route's 5-per-10min limit) were reading and writing the
+*same* bucket. A player who rolled/bought/built rapidly could find their
+next bug report rejected as "too many bug reports" despite never having
+filed one. Adding chat as a third consumer of the same limiter made this
+collision far more likely to actually happen in real play, so fixed all
+three call sites to namespace their keys (`action:`, `bugreport:`,
+`chat:`) rather than just avoiding it for the new one.
+
+**Richer bug reports.** Two additions to the existing snapshot:
+
+- **Screenshot.** `html2canvas` auto-captures the page the instant the 🐛
+  button is clicked (before the form itself paints), shown as a thumbnail
+  the reporter can discard or replace with an uploaded file. Compressed to
+  JPEG ~0.7 quality and capped at 2MB client-side (`compressToJpeg` in
+  `BugReportButton.tsx`, the single choke point both the auto-capture and
+  a manual upload go through), re-checked server-side on decode
+  (`uploadBugScreenshot`), uploaded to a new private Supabase Storage
+  bucket (`bug-screenshots`, migration `0010_bug_report_attachments.sql`).
+  `/bugs` renders it inline via a signed URL generated fresh per page load
+  — the bucket itself is never public. A capture, compression, or upload
+  failure returns `null` at every stage rather than throwing, so a report
+  always still submits with no screenshot rather than failing outright.
+
+  **Real bug found via live testing:** plain `html2canvas` throws
+  `Attempting to parse an unsupported color function "oklab"` and returns
+  a blank capture on this app, because Tailwind v4 compiles opacity
+  modifiers (`bg-black/60`, `text-danger/70`, etc.) to `oklab`/`oklch`
+  colour functions that html2canvas's CSS parser — last meaningfully
+  updated before those were in wide use — doesn't understand. Swapped the
+  dependency for `html2canvas-pro`, an actively maintained, API-compatible
+  fork specifically built to handle modern CSS colour functions. Same
+  import shape, one line changed.
+
+- **Click trail.** A second ring buffer (`src/lib/breadcrumbs.ts`,
+  installed at app boot alongside the existing console/network one) of
+  the last 30 interactions — element label only (`aria-label`/text/
+  `title`, never a raw DOM path or a typed value), plus the route.
+  Deliberately listens on `pointerdown` in the capture phase rather than
+  `click`: a native `disabled` control never dispatches a `click` event at
+  all, so `pointerdown` is what makes "tried to click Mortgage — disabled
+  (Sell the houses first.)" observable rather than invisible. A separate
+  capture-phase `focus` listener records that a text field was focused,
+  never its value. Rendered in `/bugs` as a numbered trail and folded into
+  the "Copy for Claude Code" markdown — this is the piece that turns "it
+  broke" into an actual repro.
+
+  **Real bug found via live testing, against the actual persistent
+  database:** rows created before this pass don't have a `breadcrumbs` key
+  in their stored `snapshot` jsonb at all (the field didn't exist yet).
+  `row.snapshot.breadcrumbs.length` on those rows threw
+  `Cannot read properties of undefined`, crashing the whole `/bugs` page
+  for every viewer, not just that one row — discovered immediately on
+  first real load against production-seeded data, not caught by any test
+  because every test fixture naturally included the field. Fixed at the
+  single choke point every reader goes through
+  (`mapBugReportRow` in `bug-reports.ts`): `breadcrumbs: row.snapshot.breadcrumbs ?? []`,
+  so `BugsList.tsx` and the markdown formatter never have to guard against
+  it themselves. New regression test pushes a raw fake row with no
+  `breadcrumbs` key and asserts both the load and the markdown formatting
+  succeed.
+
+  **Second real bug found in the same live pass, pre-existing and
+  unrelated to this feature:** `/bugs` also threw a hydration error —
+  "server rendered text didn't match the client" — from
+  `new Date(row.createdAt).toLocaleString()` in `BugsList.tsx`. Called with
+  no explicit locale, `toLocaleString()` depends on the ambient runtime
+  locale, which differed between this client component's server-rendered
+  HTML (Node's locale) and the browser's hydration pass (the OS/browser
+  locale) on the actual machine this was tested on — "1:14:18 PM" vs.
+  "1:14:18 p.m.". Pinned to `toLocaleString("en-US")` so server and client
+  always agree regardless of either environment's locale.
+
+**Verified:** full suite green (250 tests — chat's 8 new API tests
+including a byte-identical-state-before-and-after assertion matching the
+same check every other side-effect-free write path in this app uses,
+`api-bugs.test.ts` grown by 6 for the screenshot/breadcrumb/legacy-row
+work), `tsc`/`eslint` clean. Live two-tab verification: two-player room,
+sent a message from one tab while the other sat on the Log tab — arrived
+in the sender's tab immediately (right-aligned), a red unread dot lit the
+receiving tab's Chat label without it needing to be open, switching that
+tab to Chat showed the message left-aligned with the sender's name/token
+and cleared the dot; a 🔥 reaction from the second tab posted and
+displayed correctly. `GET /api/games/[code]` before and after the message
+came back byte-identical via direct `diff`. Bug-report pass: opened the
+form, watched a real thumbnail populate (not blank) after the
+html2canvas-pro fix, submitted with the auto-captured screenshot attached,
+and confirmed on `/bugs` — screenshot rendering inline via its signed URL,
+a 3-entry click trail ("clicked Report a bug" → "focused What did you
+expect..." → "clicked Send") both in the UI's expandable trail and in
+`GET /api/bugs`'s markdown output, and a "Screenshot: attached — view
+inline on the /bugs page" line in that same markdown.
+

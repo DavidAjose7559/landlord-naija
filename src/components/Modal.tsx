@@ -28,6 +28,11 @@ export function Modal({ onClose, children, className = "", ariaLabel, ariaLabell
     <AnimatePresence>
       <motion.div
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+        // Excluded from html2canvas's bug-report screenshot capture (see
+        // BugReportButton.tsx) — a modal overlay obscures the page state a
+        // reporter actually wants captured, so no modal in the app should
+        // ever end up in one.
+        data-html2canvas-ignore="true"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}

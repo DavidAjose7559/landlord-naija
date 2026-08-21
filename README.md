@@ -43,11 +43,16 @@ and Framer Motion.
 - **Debt resolution.** A player who can't cover a debt gets an explicit panel — mortgage/sell
   proactively, or use "Help me raise it" for a server-computed plan (bare properties before houses)
   — rather than being auto-liquidated.
+- **Chat.** A "Chat" tab next to the event log (lobby and board, any turn, any phase) — own
+  messages align differently from everyone else's, a row of one-tap reactions (👍😂😭💀🔥) covers
+  the "typing on a phone mid-game" case, and an unread dot lights the tab when a message arrives
+  while you're looking at the log instead. Spectators can read but not post. Posting never touches
+  game state.
 - **In-game bug reports.** A small 🐛 button, always available (lobby or board, any turn, any
   player — even a spectator), opens a two-field form (what happened + severity) and silently
   attaches everything else: the full game state, settings, event log, roll ledger, open trades,
-  browser/console diagnostics, and the exact commit deployed. Never touches game state. See
-  [Bug reports](#bug-reports).
+  browser/console diagnostics, an auto-captured screenshot, a 30-step click trail, and the exact
+  commit deployed. Never touches game state. See [Bug reports](#bug-reports).
 
 ## Project structure
 
@@ -188,20 +193,47 @@ happened" and a severity picker) and submits to `POST /api/bugs`, which:
    state, since a stale or malicious client shouldn't be able to fabricate what a report says
    happened.
 2. Attaches what only the browser can see: user agent, viewport, online state, device pixel ratio,
-   and the last 20 entries from a lightweight ring buffer (`src/lib/diagnostics.ts`, installed once
-   at app boot) of console errors, uncaught exceptions, unhandled promise rejections, and failed
-   network requests.
-3. Inserts one row into a standalone `bug_reports` table (migration `0008_bug_reports.sql`) —
-   `game_id` is `ON DELETE SET NULL` so a report outlives the game it came from. This path never
-   touches `games`/`players`/`events`/`rolls`/`trades`; it cannot mutate a game even in principle.
+   the last 20 entries from a lightweight ring buffer (`src/lib/diagnostics.ts`, installed once at
+   app boot) of console errors/uncaught exceptions/unhandled rejections/failed network requests,
+   and the last 30 entries from a second ring buffer (`src/lib/breadcrumbs.ts`, same app-boot
+   installer) of clicks and input focuses — element label only (`aria-label`/text/`title`, never a
+   raw DOM path), never a typed value, and disabled-button clicks included (captured on
+   `pointerdown` specifically, since a real `disabled` control never dispatches a `click` event at
+   all).
+3. Auto-captures a screenshot of the page as it looked the moment the 🐛 button was clicked
+   (`html2canvas-pro` — not plain `html2canvas`, which can't parse the `oklab`/`oklch` colours
+   Tailwind v4 compiles opacity modifiers to; dynamically imported so pages that never open the
+   form never pay for it),
+   compresses it to a size-capped JPEG client-side, and uploads it to a private Supabase Storage
+   bucket (`bug-screenshots`) — the reporter can discard it or replace it with an uploaded file
+   instead. A capture, compression, or upload failure never blocks the report itself from
+   submitting; it just has no screenshot.
+4. Inserts one row into a standalone `bug_reports` table (migrations `0008_bug_reports.sql`,
+   `0010_bug_report_attachments.sql`) — `game_id` is `ON DELETE SET NULL` so a report outlives the
+   game it came from. This path never touches `games`/`players`/`events`/`rolls`/`trades`; it
+   cannot mutate a game even in principle.
 
 Reports are reviewed at `/bugs?secret=<ADMIN_SECRET>` (see [Setup](#3-configure-environment-variables))
-— newest first, each expandable to its full JSON snapshot, with a resolved toggle and a
-**"Copy for Claude Code"** button that produces one paste-ready markdown block (description,
-severity, commit SHA, a curated state slice, recent events, captured console/network errors, and a
-repro hint). `GET /api/bugs?secret=...&unresolved=true` returns that same markdown concatenated for
-every open report — pull a whole session's bugs in one paste from the CLI. Missing or wrong secret
-is a plain 404 everywhere, same posture as the dev harness.
+— newest first, each expandable to its full JSON snapshot and numbered click trail, with the
+screenshot (if any) rendered inline via a short-lived signed URL generated server-side — the bucket
+itself stays private — a resolved toggle, and a **"Copy for Claude Code"** button that produces one
+paste-ready markdown block (description, severity, commit SHA, a curated state slice, recent
+events, captured console/network errors, the click trail, and a repro hint).
+`GET /api/bugs?secret=...&unresolved=true` returns that same markdown concatenated for every open
+report — pull a whole session's bugs in one paste from the CLI. Missing or wrong secret is a plain
+404 everywhere, same posture as the dev harness.
+
+## Chat
+
+A "Chat" tab sits next to the event log — same panel, so nothing new to find — available in the
+lobby and on the board, in any turn phase, for any player. Posting goes through
+`POST /api/games/[code]/chat`, authenticated by `client_token` exactly like every other action but
+otherwise unrelated to it: chat never goes through the rules engine, never touches `games.state`,
+and never writes an `events` row, so there is no path from a message to a game-state mutation.
+Messages persist in a standalone `messages` table (migration `0009_messages.sql`) and sync the same
+way the event log and trades do — an anon `SELECT` policy plus a Supabase Realtime subscription, no
+polling. A spectator (no session) can read the thread but not post. Rate-limited to 10 messages per
+15 seconds per player.
 
 ## Tests
 

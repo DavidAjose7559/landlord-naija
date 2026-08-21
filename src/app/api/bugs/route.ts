@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { isAdminAuthorized } from "@/lib/api/admin-auth";
-import { buildBugReportSnapshot, bugReportRequestSchema, loadBugReports, type Reporter } from "@/lib/api/bug-reports";
+import {
+  buildBugReportSnapshot,
+  bugReportRequestSchema,
+  loadBugReports,
+  uploadBugScreenshot,
+  type Reporter,
+} from "@/lib/api/bug-reports";
 import { ApiError, errorResponse } from "@/lib/api/errors";
 import { callRpc, loadGameByRoomCode, loadPlayerByClientToken, type GameRow } from "@/lib/api/game-state";
 import { checkRateLimit } from "@/lib/api/rate-limit";
@@ -56,7 +62,11 @@ export async function POST(request: Request) {
       }
     }
 
-    const rateLimitKey = body.clientToken ?? `ip:${clientIp(request)}`;
+    // Namespaced (see the action route's identical comment) — this and
+    // every other rate-limited route share one in-memory map keyed purely
+    // by string, so an unprefixed clientToken would double as the action
+    // route's own bucket key too.
+    const rateLimitKey = `bugreport:${body.clientToken ?? `ip:${clientIp(request)}`}`;
     if (!checkRateLimit(rateLimitKey, RATE_LIMIT, RATE_WINDOW_MS)) {
       throw new ApiError(429, "too many bug reports — try again in a few minutes");
     }
@@ -64,6 +74,12 @@ export async function POST(request: Request) {
     const snapshot = await buildBugReportSnapshot(game, reporter, body);
 
     const id = randomUUID();
+    // Uploaded (if present) before the insert so the row can carry its
+    // final screenshot_path in one write rather than a follow-up update.
+    // A failed upload silently yields null here — per spec, a report must
+    // still submit with no screenshot rather than fail outright.
+    const screenshotPath = body.screenshotBase64 ? await uploadBugScreenshot(id, body.screenshotBase64) : null;
+
     await callRpc("create_bug_report", {
       p_id: id,
       p_game_id: game?.id ?? null,
@@ -73,6 +89,7 @@ export async function POST(request: Request) {
       p_description: body.description,
       p_commit_sha: body.commitSha ?? null,
       p_snapshot: snapshot,
+      p_screenshot_path: screenshotPath,
     });
 
     return NextResponse.json({ ok: true, id }, { status: 201 });

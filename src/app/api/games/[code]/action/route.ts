@@ -154,7 +154,12 @@ export async function POST(request: Request, context: { params: Promise<{ code: 
     const roomCode = parseRoomCode(code);
     const body = await parseJsonBody(request, actionRequestSchema);
 
-    if (!checkRateLimit(body.clientToken, RATE_LIMIT, RATE_WINDOW_MS)) {
+    // Namespaced — checkRateLimit's in-memory store is a single shared map
+    // keyed purely by whatever string is passed, so an unprefixed
+    // clientToken here would share a bucket with any other route rate
+    // limiting the same player (chat, bug reports), letting a burst of
+    // game actions incorrectly throttle those too.
+    if (!checkRateLimit(`action:${body.clientToken}`, RATE_LIMIT, RATE_WINDOW_MS)) {
       throw new ApiError(429, "too many requests");
     }
 

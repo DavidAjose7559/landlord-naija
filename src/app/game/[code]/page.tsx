@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { ActionBar } from "@/components/ActionBar";
 import { Board } from "@/components/Board";
 import { DiceRoller } from "@/components/DiceRoller";
-import { EventLog } from "@/components/EventLog";
+import { LogChatTabs } from "@/components/LogChatTabs";
 import { MobileSheet } from "@/components/MobileSheet";
 import { PlayerPanel } from "@/components/PlayerPanel";
 import { TradePanel } from "@/components/TradePanel";
@@ -93,8 +93,10 @@ export default function BoardPage() {
       )}
 
       <PlayerPanel game={game} session={session} dispatch={dispatch} onInspect={setInspectedIndex} />
-      <EventLog
+      <LogChatTabs
         gameId={game.id}
+        roomCode={roomCode}
+        session={session}
         players={game.state.players}
         spaces={MAPS[game.state.settings.mapId].spaces}
         jailLabel={MAPS[game.state.settings.mapId].jailLabel}

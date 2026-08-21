@@ -6,12 +6,19 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import type {
   BugReportGameSnapshot,
   BugReportRow,
+  BugReportRowWithScreenshot,
   BugReportSnapshot,
   SnapshotEvent,
   SnapshotRoll,
   SnapshotTradeThread,
 } from "@/lib/bug-report-types";
 import { ApiError } from "./errors";
+
+const SCREENSHOT_BUCKET = "bug-screenshots";
+const MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024;
+// Signed URLs are generated fresh on every /bugs page load — this only
+// needs to outlive the time someone actually has the page open.
+const SCREENSHOT_URL_TTL_SECONDS = 60 * 10;
 
 export const bugSeveritySchema = z.enum(["ruins_game", "annoying", "cosmetic"]);
 
@@ -50,6 +57,29 @@ export const bugReportRequestSchema = z
           .strict(),
       )
       .max(20),
+    breadcrumbs: z
+      .array(
+        z
+          .object({
+            timestamp: z.number(),
+            label: z.string().max(200),
+            route: z.string().max(300),
+          })
+          .strict(),
+      )
+      .max(30),
+    // A data-URL-free base64 JPEG string (the client strips the
+    // "data:image/jpeg;base64," prefix before sending) — either
+    // html2canvas's auto-capture or a manually uploaded file, already
+    // compressed/size-checked client-side. This cap is deliberately loose
+    // (~11MB decoded) — it exists only to bound worst-case request size
+    // against a hostile payload, not to enforce the real 2MB limit. The
+    // real limit is uploadBugScreenshot's post-decode byte check, which
+    // drops an oversized screenshot (screenshot_path stays null) rather
+    // than failing the request — "never block a report on its
+    // attachment" means this field must never be why the whole submit
+    // 400s over a client-side compression bug.
+    screenshotBase64: z.string().max(15_000_000).optional(),
   })
   .strict();
 
@@ -232,7 +262,49 @@ export async function buildBugReportSnapshot(
     reporter,
     client: body.client,
     diagnostics: body.diagnostics,
+    breadcrumbs: body.breadcrumbs,
   };
+}
+
+// Uploads the (already client-compressed) screenshot to the private
+// bug-screenshots bucket and returns its object path, or null on ANY
+// failure — decode error, oversize, or a storage error. Never throws:
+// per spec, a report must still submit with no screenshot rather than
+// fail outright over an attachment.
+export async function uploadBugScreenshot(reportId: string, base64: string): Promise<string | null> {
+  try {
+    const buffer = Buffer.from(base64, "base64");
+    if (buffer.byteLength === 0 || buffer.byteLength > MAX_SCREENSHOT_BYTES) return null;
+
+    const path = `${reportId}.jpg`;
+    const { error } = await supabaseAdmin.storage
+      .from(SCREENSHOT_BUCKET)
+      .upload(path, buffer, { contentType: "image/jpeg", upsert: false });
+    if (error) {
+      console.error("bug screenshot upload failed", error);
+      return null;
+    }
+    return path;
+  } catch (error) {
+    console.error("bug screenshot upload threw", error);
+    return null;
+  }
+}
+
+// Never returns the object path itself to the client, and never makes the
+// bucket public — a fresh short-lived signed URL per page load is what
+// /bugs actually renders. Returns null (rather than throwing) on any
+// storage error, so one bad screenshot can't take down the whole review
+// page.
+async function signScreenshotUrl(path: string): Promise<string | null> {
+  const { data, error } = await supabaseAdmin.storage
+    .from(SCREENSHOT_BUCKET)
+    .createSignedUrl(path, SCREENSHOT_URL_TTL_SECONDS);
+  if (error || !data) {
+    console.error("failed to sign bug screenshot url", error);
+    return null;
+  }
+  return data.signedUrl;
 }
 
 interface BugReportDbRow {
@@ -246,6 +318,7 @@ interface BugReportDbRow {
   snapshot: BugReportSnapshot;
   resolved: boolean;
   created_at: string;
+  screenshot_path: string | null;
 }
 
 export function mapBugReportRow(row: BugReportDbRow): BugReportRow {
@@ -257,16 +330,31 @@ export function mapBugReportRow(row: BugReportDbRow): BugReportRow {
     severity: row.severity as BugReportRow["severity"],
     description: row.description,
     commitSha: row.commit_sha,
-    snapshot: row.snapshot,
+    // breadcrumbs is a field this app added after some rows were already
+    // stored — normalized to [] here, the one place every reader of a
+    // BugReportRow can trust it's always a real array, rather than every
+    // caller (BugsList, the markdown formatter) having to guard against a
+    // pre-migration row's snapshot not having it at all.
+    snapshot: { ...row.snapshot, breadcrumbs: row.snapshot.breadcrumbs ?? [] },
     resolved: row.resolved,
     createdAt: row.created_at,
+    screenshotPath: row.screenshot_path,
   };
 }
 
-export async function loadBugReports(opts: { unresolvedOnly?: boolean } = {}): Promise<BugReportRow[]> {
+export async function loadBugReports(
+  opts: { unresolvedOnly?: boolean } = {},
+): Promise<BugReportRowWithScreenshot[]> {
   let query = supabaseAdmin.from("bug_reports").select("*").order("created_at", { ascending: false });
   if (opts.unresolvedOnly) query = query.eq("resolved", false);
   const { data, error } = await query;
   if (error) throw new ApiError(500, "failed to load bug reports");
-  return ((data ?? []) as BugReportDbRow[]).map(mapBugReportRow);
+  const rows = ((data ?? []) as BugReportDbRow[]).map(mapBugReportRow);
+
+  return Promise.all(
+    rows.map(async (row) => ({
+      ...row,
+      screenshotUrl: row.screenshotPath ? await signScreenshotUrl(row.screenshotPath) : null,
+    })),
+  );
 }

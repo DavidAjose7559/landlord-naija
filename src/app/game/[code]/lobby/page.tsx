@@ -3,8 +3,10 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { ChatPanel } from "@/components/ChatPanel";
 import { SettingsPanel } from "@/components/SettingsPanel";
 import { TokenIcon } from "@/components/TokenIcon";
+import { useChatMessages } from "@/hooks/useChatMessages";
 import { useGame } from "@/hooks/useGame";
 import { PLAYER_TOKEN_LABEL, TOKEN_SETS } from "@/lib/tokens";
 import { MAPS } from "@/game/maps";
@@ -15,6 +17,10 @@ export default function LobbyPage() {
   const roomCode = code.toUpperCase();
   const router = useRouter();
   const { game, loading, error, session, reconnecting, setSession } = useGame(roomCode);
+  // Called unconditionally (before the loading/error early returns below)
+  // since hooks can't be conditional — the hook itself no-ops until
+  // game?.id resolves, same as every other game-derived hook here.
+  const { messages } = useChatMessages(game?.id);
 
   const [name, setName] = useState("");
   const [token, setToken] = useState<PlayerToken | null>(null);
@@ -260,6 +266,13 @@ export default function LobbyPage() {
           {!isHost && <p className="text-sm text-muted">Waiting for the host to start the game…</p>}
         </>
       )}
+
+      {/* Readable even before joining (a soon-to-be spectator watching the
+          lobby fill up) — ChatPanel itself gates posting on session, not
+          this page. */}
+      <div className="w-full max-w-md">
+        <ChatPanel roomCode={roomCode} session={session} players={game.state.players} messages={messages} />
+      </div>
 
       <div className="mt-4 flex max-w-md flex-col items-center gap-3 text-center">
         <code className="break-all rounded-lg bg-surface px-4 py-2 text-xs text-muted">{game.serverSeedHash}</code>

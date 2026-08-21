@@ -31,6 +31,15 @@ export interface ClientEnvSnapshot {
   devicePixelRatio: number;
 }
 
+// One entry in the client-side interaction ring buffer
+// (src/lib/breadcrumbs.ts) — the last 30 clicks/focuses leading up to the
+// report, never raw DOM paths and never a typed value.
+export interface Breadcrumb {
+  timestamp: number;
+  label: string;
+  route: string;
+}
+
 export interface SnapshotPlayer {
   id: string;
   name: string;
@@ -121,9 +130,10 @@ export interface BugReportSnapshot {
 
   client: ClientEnvSnapshot;
   diagnostics: DiagnosticEntry[];
+  breadcrumbs: Breadcrumb[];
 }
 
-// One row as read back from bug_reports (see 0008_bug_reports.sql).
+// One row as read back from bug_reports (see 0008/0010_bug_reports*.sql).
 export interface BugReportRow {
   id: string;
   gameId: string | null;
@@ -135,4 +145,17 @@ export interface BugReportRow {
   snapshot: BugReportSnapshot;
   resolved: boolean;
   createdAt: string;
+  // Object path in the private bug-screenshots bucket, or null. Never
+  // fetch this directly client-side — the /bugs page reads a
+  // server-generated signed URL instead (screenshotUrl below), since the
+  // bucket is private.
+  screenshotPath: string | null;
+}
+
+// Populated only by the /bugs page's server component (loadBugReports),
+// never stored — a short-lived signed URL generated fresh on each page
+// load. null when the report has no screenshot, or the signed-URL call
+// itself failed.
+export interface BugReportRowWithScreenshot extends BugReportRow {
+  screenshotUrl: string | null;
 }
