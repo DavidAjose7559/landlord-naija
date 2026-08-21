@@ -7,7 +7,8 @@ import { MAPS } from "@/game/maps";
 import type { GameState, PlayerState } from "@/game/types";
 import { formatCAD } from "@/lib/money";
 import { COLOR_GROUP_HEX } from "@/lib/board-colors";
-import { PLAYER_TOKEN_COLOR, PLAYER_TOKEN_EMOJI } from "@/lib/tokens";
+import { PLAYER_TOKEN_COLOR } from "@/lib/tokens";
+import { TokenIcon } from "./TokenIcon";
 
 interface BoardProps {
   state: GameState;
@@ -125,7 +126,7 @@ function PlayerToken({ player, offsetIndex, offsetCount }: { player: PlayerState
       title={player.name}
       aria-hidden="true"
     >
-      <span className="drop-shadow-sm">{PLAYER_TOKEN_EMOJI[player.token]}</span>
+      <TokenIcon token={player.token} className="text-sm drop-shadow-sm" />
     </motion.div>
   );
 }

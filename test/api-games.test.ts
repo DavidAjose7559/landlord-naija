@@ -145,6 +145,29 @@ describe("POST /api/games/[code]/join", () => {
     const res = await joinGame(postJson("http://test/api/games/nope/join", { name: "Ada", token: "danfo" }), ctx("nope"));
     expect(res.status).toBe(400);
   });
+
+  it("accepts a classic-set token alongside the naija set", async () => {
+    const createRes = await createGame(postJson("http://test/api/games", {}));
+    const { roomCode } = await createRes.json();
+    const res = await joinGame(postJson(`http://test/api/games/${roomCode}/join`, { name: "Ada", token: "tophat" }), ctx(roomCode));
+    expect(res.status).toBe(201);
+  });
+
+  it("rejects a token that isn't in either set", async () => {
+    const createRes = await createGame(postJson("http://test/api/games", {}));
+    const { roomCode } = await createRes.json();
+    const res = await joinGame(postJson(`http://test/api/games/${roomCode}/join`, { name: "Ada", token: "battleship" }), ctx(roomCode));
+    expect(res.status).toBe(400);
+  });
+
+  it("a naija token and a classic token don't collide even if 'taken'", async () => {
+    const createRes = await createGame(postJson("http://test/api/games", {}));
+    const { roomCode } = await createRes.json();
+    const first = await joinGame(postJson(`http://test/api/games/${roomCode}/join`, { name: "Ada", token: "dog" }), ctx(roomCode));
+    expect(first.status).toBe(201);
+    const second = await joinGame(postJson(`http://test/api/games/${roomCode}/join`, { name: "Bola", token: "danfo" }), ctx(roomCode));
+    expect(second.status).toBe(201);
+  });
 });
 
 describe("POST /api/games/[code]/start", () => {

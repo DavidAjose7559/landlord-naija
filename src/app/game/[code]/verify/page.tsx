@@ -3,8 +3,8 @@
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { RollDistributionChart } from "@/components/RollDistributionChart";
+import { TokenIcon } from "@/components/TokenIcon";
 import { useGame } from "@/hooks/useGame";
-import { PLAYER_TOKEN_EMOJI } from "@/lib/tokens";
 import { supabase } from "@/lib/supabase/client";
 import { verifyGameBrowser, type BrowserRollRecord, type BrowserVerifyResult } from "@/lib/verify-client";
 
@@ -182,7 +182,7 @@ export default function VerifyPage() {
               return (
                 <div key={r.rollIndex} className="flex items-center gap-3 px-4 py-2.5 text-sm">
                   <span className="w-10 text-muted tabular-nums">#{r.rollIndex}</span>
-                  <span className="text-lg">{player ? PLAYER_TOKEN_EMOJI[player.token] : "?"}</span>
+                  {player ? <TokenIcon token={player.token} className="text-lg" /> : <span className="text-lg">?</span>}
                   <span className="flex-1 text-ink">{player?.name ?? "unknown player"}</span>
                   <span className="tabular-nums text-ink">
                     {r.d1} + {r.d2}

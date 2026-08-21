@@ -10,15 +10,21 @@ import type { MapId } from "./maps/types";
 
 export type GameStatus = "lobby" | "active" | "finished";
 
-export type PlayerToken =
-  | "danfo"
-  | "keke"
-  | "jollof"
-  | "gele"
-  | "okada"
-  | "agbada"
-  | "suya"
-  | "bottle";
+export type NaijaToken = "danfo" | "keke" | "jollof" | "gele" | "okada" | "agbada" | "suya" | "bottle";
+
+// Original artwork (see TokenIcon.tsx) — generic silhouettes, not traced
+// from or resembling any existing product.
+export type ClassicToken =
+  | "tophat"
+  | "racecar"
+  | "dog"
+  | "boot"
+  | "ship"
+  | "thimble"
+  | "wheelbarrow"
+  | "iron";
+
+export type PlayerToken = NaijaToken | ClassicToken;
 
 // Host-configured, frozen once status leaves "lobby" (see games.settings /
 // GameState.settings). Every field here is actually wired into engine.ts —

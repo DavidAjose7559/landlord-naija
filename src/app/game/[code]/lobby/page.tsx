@@ -4,8 +4,9 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { SettingsPanel } from "@/components/SettingsPanel";
+import { TokenIcon } from "@/components/TokenIcon";
 import { useGame } from "@/hooks/useGame";
-import { PLAYER_TOKENS, PLAYER_TOKEN_EMOJI, PLAYER_TOKEN_LABEL } from "@/lib/tokens";
+import { PLAYER_TOKEN_LABEL, TOKEN_SETS } from "@/lib/tokens";
 import type { PlayerToken } from "@/game/types";
 
 export default function LobbyPage() {
@@ -16,6 +17,7 @@ export default function LobbyPage() {
 
   const [name, setName] = useState("");
   const [token, setToken] = useState<PlayerToken | null>(null);
+  const [tokenSetId, setTokenSetId] = useState<"naija" | "classic">("naija");
   const [joinError, setJoinError] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -163,24 +165,40 @@ export default function LobbyPage() {
             maxLength={40}
             className="w-full max-w-xs rounded-full bg-surface px-6 py-3 text-center text-base text-ink placeholder:text-muted focus:outline-none"
           />
-          <div className="grid grid-cols-4 gap-3">
-            {PLAYER_TOKENS.map((t) => {
-              const takenByOther = takenTokens.has(t);
-              return (
+          <div className="flex w-full max-w-xs flex-col gap-3">
+            <div className="flex gap-1 rounded-full bg-surface p-1">
+              {TOKEN_SETS.map((set) => (
                 <button
-                  key={t}
+                  key={set.id}
                   type="button"
-                  disabled={takenByOther}
-                  onClick={() => setToken(t)}
-                  className={`flex flex-col items-center gap-1 rounded-2xl px-4 py-3 text-2xl transition-colors ${
-                    token === t ? "bg-accent text-accent-foreground" : "bg-surface text-ink hover:bg-surface-2"
-                  } ${takenByOther ? "opacity-30" : ""}`}
+                  onClick={() => setTokenSetId(set.id)}
+                  className={`flex-1 rounded-full py-1.5 text-xs font-semibold tracking-wide uppercase transition-colors ${
+                    tokenSetId === set.id ? "bg-accent text-accent-foreground" : "text-muted hover:text-ink"
+                  }`}
                 >
-                  <span>{PLAYER_TOKEN_EMOJI[t]}</span>
-                  <span className="text-[11px] font-medium">{PLAYER_TOKEN_LABEL[t]}</span>
+                  {set.label}
                 </button>
-              );
-            })}
+              ))}
+            </div>
+            <div className="grid grid-cols-4 gap-3">
+              {TOKEN_SETS.find((s) => s.id === tokenSetId)!.tokens.map((t) => {
+                const takenByOther = takenTokens.has(t);
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    disabled={takenByOther}
+                    onClick={() => setToken(t)}
+                    className={`flex flex-col items-center gap-1 rounded-2xl px-4 py-3 text-2xl transition-colors ${
+                      token === t ? "bg-accent text-accent-foreground" : "bg-surface text-ink hover:bg-surface-2"
+                    } ${takenByOther ? "opacity-30" : ""}`}
+                  >
+                    <TokenIcon token={t} />
+                    <span className="text-[11px] font-medium">{PLAYER_TOKEN_LABEL[t]}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
           <button
             type="submit"
@@ -203,7 +221,7 @@ export default function LobbyPage() {
                   transition={{ type: "spring", stiffness: 300, damping: 26 }}
                   className="flex items-center gap-4 rounded-2xl bg-surface px-5 py-3"
                 >
-                  <span className="text-2xl">{PLAYER_TOKEN_EMOJI[player.token]}</span>
+                  <TokenIcon token={player.token} className="text-2xl" />
                   <span className="flex-1 text-left font-medium text-ink">{player.name}</span>
                   {player.id === game.state.hostPlayerId && <span className="text-xs font-semibold text-accent">HOST</span>}
                   {player.id === session.playerId && <span className="text-xs text-muted">you</span>}

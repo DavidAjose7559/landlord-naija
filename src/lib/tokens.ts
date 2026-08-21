@@ -1,6 +1,6 @@
-import type { PlayerToken } from "@/game/types";
+import type { ClassicToken, NaijaToken, PlayerToken } from "@/game/types";
 
-export const PLAYER_TOKENS: readonly PlayerToken[] = [
+export const NAIJA_TOKENS: readonly NaijaToken[] = [
   "danfo",
   "keke",
   "jollof",
@@ -11,6 +11,29 @@ export const PLAYER_TOKENS: readonly PlayerToken[] = [
   "bottle",
 ];
 
+export const CLASSIC_TOKENS: readonly ClassicToken[] = [
+  "tophat",
+  "racecar",
+  "dog",
+  "boot",
+  "ship",
+  "thimble",
+  "wheelbarrow",
+  "iron",
+];
+
+// The tabbed lobby picker's two sets, in display order.
+export const TOKEN_SETS: readonly { id: "naija" | "classic"; label: string; tokens: readonly PlayerToken[] }[] = [
+  { id: "naija", label: "Naija", tokens: NAIJA_TOKENS },
+  { id: "classic", label: "Classic", tokens: CLASSIC_TOKENS },
+];
+
+export const PLAYER_TOKENS: readonly PlayerToken[] = [...NAIJA_TOKENS, ...CLASSIC_TOKENS];
+
+export function isClassicToken(token: PlayerToken): token is ClassicToken {
+  return (CLASSIC_TOKENS as readonly PlayerToken[]).includes(token);
+}
+
 export const PLAYER_TOKEN_LABEL: Record<PlayerToken, string> = {
   danfo: "Danfo",
   keke: "Keke",
@@ -20,9 +43,19 @@ export const PLAYER_TOKEN_LABEL: Record<PlayerToken, string> = {
   agbada: "Agbada",
   suya: "Suya",
   bottle: "Bottle",
+  tophat: "Top Hat",
+  racecar: "Race Car",
+  dog: "Dog",
+  boot: "Boot",
+  ship: "Ship",
+  thimble: "Thimble",
+  wheelbarrow: "Wheelbarrow",
+  iron: "Iron",
 };
 
-export const PLAYER_TOKEN_EMOJI: Record<PlayerToken, string> = {
+// Naija tokens render as emoji; classic tokens render as original SVG
+// silhouettes (see TokenIcon.tsx) — this map only covers the former.
+export const PLAYER_TOKEN_EMOJI: Record<NaijaToken, string> = {
   danfo: "🚌",
   keke: "🛺",
   jollof: "🍚",
@@ -45,4 +78,12 @@ export const PLAYER_TOKEN_COLOR: Record<PlayerToken, string> = {
   agbada: "#26A69A",
   suya: "#A1887F",
   bottle: "#26C6DA",
+  tophat: "#78909C",
+  racecar: "#E53935",
+  dog: "#8D6E63",
+  boot: "#6D4C41",
+  ship: "#1E88E5",
+  thimble: "#FDD835",
+  wheelbarrow: "#43A047",
+  iron: "#546E7A",
 };

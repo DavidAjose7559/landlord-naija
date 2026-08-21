@@ -8,8 +8,8 @@ import type { ClientAction } from "@/lib/api/client-action";
 import type { PublicGame } from "@/lib/api/public-game";
 import { COLOR_GROUP_HEX } from "@/lib/board-colors";
 import type { PlayerSession } from "@/lib/session";
-import { PLAYER_TOKEN_EMOJI } from "@/lib/tokens";
 import { Money } from "./Money";
+import { TokenIcon } from "./TokenIcon";
 
 interface PlayerPanelProps {
   game: PublicGame;
@@ -88,7 +88,7 @@ export function PlayerPanel({ game, session, dispatch }: PlayerPanelProps) {
             }`}
           >
             <div className="flex items-center gap-3">
-              <span className="text-xl">{PLAYER_TOKEN_EMOJI[player.token]}</span>
+              <TokenIcon token={player.token} className="text-xl" />
               <div className="flex flex-1 flex-col">
                 <span className="text-sm font-medium text-ink">
                   {player.name}

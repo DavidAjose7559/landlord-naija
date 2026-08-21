@@ -5,8 +5,8 @@ import { MAPS } from "@/game/maps";
 import type { PublicGame } from "@/lib/api/public-game";
 import { formatCAD } from "@/lib/money";
 import type { PlayerSession } from "@/lib/session";
-import { PLAYER_TOKEN_EMOJI } from "@/lib/tokens";
 import { supabase } from "@/lib/supabase/client";
+import { TokenIcon } from "./TokenIcon";
 
 interface TradePanelProps {
   game: PublicGame;
@@ -184,8 +184,15 @@ export function TradePanel({ game, session }: TradePanelProps) {
                 onClick={() => setOpenThreadKey([...threads.entries()].find(([, list]) => list.includes(trade))?.[0] ?? null)}
                 className="flex items-center justify-between rounded-2xl bg-surface-2 px-4 py-2.5 text-left text-sm text-ink hover:bg-white/10"
               >
-                <span>
-                  {counterparty ? `${PLAYER_TOKEN_EMOJI[counterparty.token]} ${counterparty.name}` : "Trade"} · round {trade.round}
+                <span className="flex items-center gap-1.5">
+                  {counterparty ? (
+                    <>
+                      <TokenIcon token={counterparty.token} /> {counterparty.name}
+                    </>
+                  ) : (
+                    "Trade"
+                  )}{" "}
+                  · round {trade.round}
                 </span>
                 <span className={myTurn ? "font-semibold text-accent" : "text-muted"}>{myTurn ? "Your move" : "Waiting"}</span>
               </button>
@@ -219,7 +226,7 @@ export function TradePanel({ game, session }: TradePanelProps) {
               >
                 {others.map((p) => (
                   <option key={p.id} value={p.id} disabled={hasOpenThreadWith(p.id)}>
-                    {PLAYER_TOKEN_EMOJI[p.token]} {p.name}
+                    {p.name}
                     {hasOpenThreadWith(p.id) ? " (negotiation open)" : ""}
                   </option>
                 ))}

@@ -9,7 +9,24 @@ import { parseJsonBody, parseRoomCode } from "@/lib/api/validate";
 const joinSchema = z
   .object({
     name: z.string().trim().min(1).max(40),
-    token: z.enum(["danfo", "keke", "jollof", "gele", "okada", "agbada", "suya", "bottle"]),
+    token: z.enum([
+      "danfo",
+      "keke",
+      "jollof",
+      "gele",
+      "okada",
+      "agbada",
+      "suya",
+      "bottle",
+      "tophat",
+      "racecar",
+      "dog",
+      "boot",
+      "ship",
+      "thimble",
+      "wheelbarrow",
+      "iron",
+    ]),
   })
   .strict();
 
