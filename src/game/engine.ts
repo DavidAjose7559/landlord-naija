@@ -89,6 +89,28 @@ export type GameEvent =
   | { type: "TRADE_DECLINED"; tradeId: number }
   | { type: "TRADE_REJECTED"; tradeId: number; reason: string };
 
+// The state a freshly-created game starts in, before any player has
+// joined. The caller (API layer) pushes players into `players` directly
+// as they join — that's a lobby-only operation, not a GameAction, since
+// joining isn't part of the in-progress turn state machine.
+export function createInitialGameState(): GameState {
+  return {
+    status: "lobby",
+    turnPhase: "awaiting_roll",
+    currentPlayerIndex: 0,
+    rollIndex: 0,
+    doublesCount: 0,
+    players: [],
+    ownership: {},
+    winnerPlayerId: null,
+    lastRoll: null,
+    pendingCardDeck: null,
+    pendingDebt: null,
+    trades: [],
+    nextTradeId: 1,
+  };
+}
+
 // ============================================================================
 // dev-only integrity guard — every cash figure in this engine is integer
 // cents. A non-integer or negative value means a bug, not bad user input.

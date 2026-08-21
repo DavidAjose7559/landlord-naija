@@ -106,6 +106,9 @@ export type Space =
   | PropertySpace;
 
 export const GO_SALARY = dollars(200);
+export const STARTING_CASH = dollars(1500);
+// One of each PlayerToken (there are exactly 8 pieces).
+export const MAX_PLAYERS = 8;
 
 export const HOUSE_COST_BY_GROUP: Record<ColorGroup, number> = {
   brown: dollars(50),
