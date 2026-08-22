@@ -174,7 +174,11 @@ export function TradePanel({ game, session }: TradePanelProps) {
 
   return (
     <div className="flex flex-col gap-2">
-      {toast && <div className="rounded-full bg-accent/20 px-4 py-2 text-center text-xs font-medium text-accent">{toast}</div>}
+      {/* (Task 9) A passive notice, not an action — plain surface styling
+          instead of accent, which is reserved for the one thing you can
+          actually do (and could otherwise be visible on screen at the
+          same time as this, inside an open negotiation). */}
+      {toast && <div className="rounded-full bg-surface-2 px-4 py-2 text-center text-xs font-medium text-ink">{toast}</div>}
 
       {myOpenThreads.length > 0 && (
         <div className="flex flex-col gap-1.5">

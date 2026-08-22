@@ -151,9 +151,14 @@ export default function VerifyPage() {
           </button>
 
           {clientResult && (
+            // (Task 9) A result banner is a status announcement, not an
+            // action — accent yellow is reserved for the one thing you can
+            // still DO on this screen (Verify, above), so a passing check
+            // uses the gain green instead of competing with it for the
+            // same colour.
             <div
               className={`rounded-2xl px-6 py-5 text-center text-lg font-bold ${
-                clientResult.ok ? "bg-accent text-accent-foreground" : "bg-danger text-white"
+                clientResult.ok ? "bg-gain/15 text-gain" : "bg-danger text-white"
               }`}
             >
               {clientResult.ok

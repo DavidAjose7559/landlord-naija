@@ -38,8 +38,22 @@
   --color-surface-2: var(--s2);
   --color-ink: var(--hi);
   --color-muted: var(--mid);
-  --color-accent: #00a859;
-  --color-accent-foreground: #04150c;
+  /* (Task 9) Danfo yellow — the one accent colour in the app. Deep green
+     stays as felt (per-map --felt, untouched); it was disappearing into
+     the background as an ACCENT, which is why buttons read as flat
+     panels rather than actionable. The rule this enforces everywhere:
+     danfo yellow is never a region colour and never decoration — it
+     marks exactly one thing, where you can act (your turn, the Roll
+     button, the active tile, the winning bid, the auction timer, the
+     highlighted rent rung). --danfo/--danfo-ink are the named tokens the
+     design review specifies; --color-accent/-accent-foreground alias
+     them so every existing bg-accent/text-accent call site (Roll, rent
+     ladder highlight, quick-bid buttons, the active-player bar, …)
+     inherits the swap without a second edit anywhere. */
+  --danfo: #ffc72c;
+  --danfo-ink: #1a1305;
+  --color-accent: var(--danfo);
+  --color-accent-foreground: var(--danfo-ink);
   --color-danger: #e5484d;
   --color-gold: #c9a227; /* Treasure */
   --color-magenta: #d6407f; /* Surprise */

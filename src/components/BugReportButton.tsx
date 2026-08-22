@@ -307,8 +307,10 @@ export function BugReportButton() {
         </Modal>
       )}
 
+      {/* (Task 9) A success toast, not an action — danfo yellow marks
+          "where you can act," not "this succeeded." */}
       {toast && (
-        <div className="fixed bottom-16 right-4 z-[60] rounded-full bg-accent/20 px-4 py-2 text-xs font-medium text-accent shadow-lg">
+        <div className="fixed bottom-16 right-4 z-[60] rounded-full bg-gain/20 px-4 py-2 text-xs font-medium text-gain shadow-lg">
           {toast}
         </div>
       )}
