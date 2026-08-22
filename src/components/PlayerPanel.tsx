@@ -23,7 +23,7 @@ interface PlayerPanelProps {
   game: PublicGame;
   session: PlayerSession | null;
   dispatch: (action: ClientAction) => Promise<{ ok: boolean; reason?: string } | null>;
-  onInspect?: (spaceIndex: number) => void;
+  onInspect?: (spaceIndex: number, anchor?: DOMRect) => void;
 }
 
 interface OwnedSpaceInfo {
@@ -139,7 +139,7 @@ function Portfolio({
   player: PlayerState;
   onAct: (action: ClientAction, spaceIndex: number) => void;
   busySpace: number | null;
-  onInspect?: (spaceIndex: number) => void;
+  onInspect?: (spaceIndex: number, anchor?: DOMRect) => void;
 }) {
   const owned = ownedSpaces(game, player.id);
   if (owned.length === 0) {

@@ -2,7 +2,7 @@
 
 import { motion } from "framer-motion";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { GOTOJAIL_INDEX, JAIL_INDEX, type ColorGroup, type Space } from "@/game/board";
+import { GOTOJAIL_INDEX, JAIL_INDEX, type Space } from "@/game/board";
 import { computePropertyRent, computeTransportRent, computeUtilityRent } from "@/game/engine";
 import { MAPS } from "@/game/maps";
 import type { GameState, PlayerState, PropertyOwnership } from "@/game/types";
@@ -10,16 +10,15 @@ import type { ClientAction } from "@/lib/api/client-action";
 import type { PublicGame } from "@/lib/api/public-game";
 import type { PlayerSession } from "@/lib/session";
 import { formatCAD } from "@/lib/money";
-import { COLOR_GROUP_VAR } from "@/lib/board-colors";
+import { COLOR_GROUP_VAR, regionInkClass, TRANSPORT_PLATE_COLOR, UTILITY_PLATE_COLOR } from "@/lib/board-colors";
 import { PLAYER_TOKEN_COLOR } from "@/lib/tokens";
-import { setBoardCenterSlot } from "@/lib/board-center-slot";
 import { BoardCenterControls } from "./BoardCenterControls";
 import { TokenIcon } from "./TokenIcon";
 
 interface BoardProps {
   state: GameState;
   className?: string;
-  onInspect?: (spaceIndex: number) => void;
+  onInspect?: (spaceIndex: number, anchor?: DOMRect) => void;
   // (Section 4d) Roll/End Turn/Draw Card render inside the board's own
   // centre now — optional so any test/story rendering Board with just
   // `state` still works, just without the centre controls.
@@ -184,19 +183,6 @@ const CORNER_SCALE = CORNER_RATIO; // corners get proportionally more room than 
 // meaningfully at these sizes, and a scaled blur radius is more likely to
 // look wrong than right).
 const TILE_ELEVATION = "inset 0 1px 0 rgba(255,255,255,.08), 0 1px 0 rgba(0,0,0,.45), 0 4px 10px -6px rgba(0,0,0,.7)";
-
-// Only "yellow" (Amber) is light enough to need dark ink on its plate —
-// every other fixed region colour (including the borderline "Lagoon"
-// cyan) reads fine with white. See maps/types.ts for how these map to
-// the fixed 8-colour palette, and globals.css for the actual hex values.
-const DARK_INK_REGIONS = new Set<ColorGroup>(["yellow"]);
-
-// Transport/utility spaces don't belong to any of the 8 property regions
-// (see maps.test.ts — regions cover exactly the 22 property spaces), so
-// they can't inherit a region colour for their plate — see
-// --color-plate-transport/-utility in globals.css.
-const TRANSPORT_PLATE_COLOR = "var(--color-plate-transport)";
-const UTILITY_PLATE_COLOR = "var(--color-plate-utility)";
 
 // ============================================================================
 // step-by-step token movement — a short hop (<=12 spaces, either direction)
@@ -466,7 +452,7 @@ function BoardSpace({
 }: {
   space: Space;
   state: GameState;
-  onInspect?: (spaceIndex: number) => void;
+  onInspect?: (spaceIndex: number, anchor?: DOMRect) => void;
   highlighted?: boolean;
 }) {
   const { row, col } = gridPosition(space.index);
@@ -487,14 +473,17 @@ function BoardSpace({
         : space.type === "utility"
           ? UTILITY_PLATE_COLOR
           : undefined;
-  const plateInk = space.type === "property" && DARK_INK_REGIONS.has(space.color) ? "text-board-ink/86" : "text-white";
+  const plateInk = space.type === "property" ? regionInkClass(space.color) : "text-white";
   const regionLabel =
     space.type === "property" || space.type === "transport" || space.type === "utility" ? (space.regionLabel ?? "") : "";
 
   const label = describeSpace(space, state.ownership, state.players);
 
-  function inspect() {
-    onInspect?.(space.index);
+  // (Task 6) Passes the tile's own bounding rect along so the property
+  // popover can anchor itself next to whichever tile was actually
+  // clicked, instead of always opening dead centre.
+  function inspect(rect: DOMRect) {
+    onInspect?.(space.index, rect);
   }
 
   // Ownership (rank 2 in the hierarchy, after the tokens themselves): a
@@ -563,11 +552,11 @@ function BoardSpace({
       role="gridcell"
       tabIndex={0}
       aria-label={`${label}. Press Enter for details.`}
-      onClick={inspect}
+      onClick={(e) => inspect(e.currentTarget.getBoundingClientRect())}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          inspect();
+          inspect(e.currentTarget.getBoundingClientRect());
         }
       }}
       className={`board-tile-rule relative flex cursor-pointer overflow-hidden rounded-[5px] bg-board outline-none focus-visible:ring-2 focus-visible:ring-accent ${
@@ -761,7 +750,6 @@ export function Board({ state, className, onInspect, game, session, dispatch, mu
               surface (inset shadow) the way a real card table has a felt
               well at its centre. Hosts the turn controls (Fix B/Section 4d). */}
           <div
-            ref={setBoardCenterSlot}
             className="relative flex items-center justify-center overflow-hidden rounded-[12px]"
             style={{
               gridRow: "2 / 11",
@@ -779,11 +767,6 @@ export function Board({ state, className, onInspect, game, session, dispatch, mu
                 <BoardCenterControls game={game} session={session ?? null} dispatch={dispatch} muted={muted ?? true} />
               )}
             </div>
-            {/* Portal target for Section 4c: card reveals, the property
-                inspector, and any tooltip/toast that would otherwise cover
-                the ring of spaces render here instead (see
-                useBoardCenterSlot) — stacked above the default centre
-                controls via z-20. */}
           </div>
         </div>
 

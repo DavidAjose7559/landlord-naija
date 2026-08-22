@@ -23,6 +23,17 @@ export default function BoardPage() {
 
   const [muted, setMuted] = useState(true);
   const [inspectedIndex, setInspectedIndex] = useState<number | null>(null);
+  // (Task 6) The tile's own bounding rect at the moment it was clicked —
+  // lets the property popover anchor itself next to that tile instead of
+  // always opening dead centre. Cleared alongside inspectedIndex; kept
+  // as-is across in-popover navigation (the region chip row), so browsing
+  // sibling properties doesn't make the popover jump around.
+  const [inspectAnchor, setInspectAnchor] = useState<DOMRect | undefined>(undefined);
+
+  function handleInspect(index: number, anchor?: DOMRect) {
+    setInspectedIndex(index);
+    if (anchor) setInspectAnchor(anchor);
+  }
 
   useEffect(() => {
     if (game && game.status === "lobby") {
@@ -97,7 +108,7 @@ export default function BoardPage() {
         </>
       )}
 
-      <PlayerPanel game={game} session={session} dispatch={dispatch} onInspect={setInspectedIndex} />
+      <PlayerPanel game={game} session={session} dispatch={dispatch} onInspect={handleInspect} />
       <ChatSection gameId={game.id} roomCode={roomCode} session={session} players={game.state.players} />
 
       {pending && <p className="text-center text-xs text-muted">Syncing…</p>}
@@ -109,7 +120,7 @@ export default function BoardPage() {
       <Board
         state={game.state}
         className="md:sticky md:top-8"
-        onInspect={setInspectedIndex}
+        onInspect={handleInspect}
         game={game}
         session={session}
         dispatch={dispatch}
@@ -126,8 +137,14 @@ export default function BoardPage() {
         <PropertyInspector
           state={game.state}
           spaceIndex={inspectedIndex}
-          onClose={() => setInspectedIndex(null)}
-          onNavigate={setInspectedIndex}
+          anchor={inspectAnchor}
+          session={session}
+          dispatch={dispatch}
+          onClose={() => {
+            setInspectedIndex(null);
+            setInspectAnchor(undefined);
+          }}
+          onNavigate={(index) => setInspectedIndex(index)}
         />
       )}
     </div>
