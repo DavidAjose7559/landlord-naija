@@ -38,6 +38,14 @@
   --color-group-green: #00a859;
   --color-group-darkblue: #1e3a8a;
 
+  /* Transport/utility spaces aren't part of any of the 8 property
+     regions (see maps.test.ts), so they can't inherit a region colour
+     for their tile plate — fixed, muted, and visually distinct from all
+     8 saturated region colours instead. Never themed (defined once at
+     :root, not repeated per [data-theme] scope below). */
+  --color-plate-transport: #5b6b76;
+  --color-plate-utility: #6b6558;
+
   /* Board *rendering* tokens (not colours) that a theme can also vary —
      grid rule weight, whether the board face casts a shadow, paper-grain
      strength, and which font family property names/prices use. "modern"
@@ -195,12 +203,12 @@ body {
    Heritage-specific structural overrides. Everything else (colours, grid
    gap, shadow, grain) is a plain token swap the components already
    consume unconditionally (see [data-theme="heritage"] above) — these
-   three rules are the only place theme-specific CSS reaches into a
-   component's own class names, because "condensed/uppercase/tight-tracked
-   display type" and "a rule beneath the colour strip" aren't expressible
-   as a single swappable custom property the way a colour is. The
-   components themselves still never branch on theme; they just always
-   render `.board-space-name` / `.board-price` / `.board-space-bar`, and
+   rules are the only place theme-specific CSS reaches into a component's
+   own class names, because "condensed/uppercase/tight-tracked display
+   type" and "a heavier ink rule" aren't expressible as a single
+   swappable custom property the way a colour is. The components
+   themselves still never branch on theme; they just always render
+   `.board-space-name` / `.board-jail-visiting` / `.board-tile-rule`, and
    only the heritage scope has an opinion about them.
    ============================================================================ */
 [data-theme="heritage"] .board-space-name {
@@ -209,15 +217,16 @@ body {
   letter-spacing: -0.01em;
 }
 
-[data-theme="heritage"] .board-price {
-  font-family: var(--font-board-display);
-  font-weight: 500;
-}
-
-[data-theme="heritage"] .board-space-bar {
-  border-bottom: 2px solid var(--h-board-line);
-}
-
 [data-theme="heritage"] .board-jail-visiting {
   background: color-mix(in srgb, var(--h-board) 85%, var(--h-board-line));
+}
+
+/* (Design system v2 §02) The tile's ink rule — 1.5px on every map, 2px
+   on Original only ("one extra allowance as the heritage map"). */
+.board-tile-rule {
+  border: 1.5px solid color-mix(in srgb, var(--color-board-ink) 90%, transparent);
+}
+
+[data-theme="heritage"] .board-tile-rule {
+  border-width: 2px;
 }

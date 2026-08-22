@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Oswald } from "next/font/google";
+import { Archivo, Geist, Geist_Mono, Oswald } from "next/font/google";
 import { BugReportButton } from "@/components/BugReportButton";
 import { DiagnosticsBoot } from "@/components/DiagnosticsBoot";
 import "./globals.css";
@@ -12,6 +12,22 @@ const geistSans = Geist({
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+});
+
+// Design system v2: the display face for board tiles (and, from task 4,
+// headings/the wordmark) — a true variable font (wdth + wght axes,
+// self-hosted at build time by next/font, no explicit weight array
+// needed since it isn't a static-weight family). Board.tsx sets its own
+// 'wdth'/'wght' via fontVariationSettings per element; this just gets the
+// font itself onto the page.
+const archivo = Archivo({
+  variable: "--font-archivo",
+  subsets: ["latin"],
+  // Without this, next/font subsets the variable font down to just the
+  // wght axis and bakes wdth to its default (100) — Board.tsx's `'wdth'
+  // 76` in fontVariationSettings would then have nothing to actually
+  // move, silently rendering full-width text that overflows every tile.
+  axes: ["wdth"],
 });
 
 // Heritage theme's display face for property names/prices (see
@@ -47,7 +63,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${oswald.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${oswald.variable} ${archivo.variable} h-full antialiased`}
     >
       {/* suppressHydrationWarning: browser extensions (Grammarly, etc.) inject
           data-gr-* attributes onto <body> before React hydrates, which would

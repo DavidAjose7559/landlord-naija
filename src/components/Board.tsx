@@ -2,9 +2,10 @@
 
 import { motion } from "framer-motion";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { GOTOJAIL_INDEX, JAIL_INDEX, type Space } from "@/game/board";
+import { GOTOJAIL_INDEX, JAIL_INDEX, type ColorGroup, type Space } from "@/game/board";
+import { computePropertyRent, computeTransportRent, computeUtilityRent } from "@/game/engine";
 import { MAPS } from "@/game/maps";
-import type { GameState, PlayerState } from "@/game/types";
+import type { GameState, PlayerState, PropertyOwnership } from "@/game/types";
 import type { ClientAction } from "@/lib/api/client-action";
 import type { PublicGame } from "@/lib/api/public-game";
 import type { PlayerSession } from "@/lib/session";
@@ -34,19 +35,21 @@ interface BoardProps {
 // bottom-right -> bottom-left -> top-left -> top-right -> back to GO,
 // matching a physical Monopoly board's layout.
 //
-// (Fix A) Tracks are NOT uniform: corners are 13.2% of the board, the 9
-// inner tracks on each edge are 8.2% — depth-to-width ~1.6, close to a
-// real board, versus the dead-flat 1:1 a uniform 11x11 grid gives every
-// cell. `TRACKS` mirrors that in `grid-template-columns`/`-rows`;
-// `trackCenterPercent` replaces the old flat `/11` division for anything
-// that needs a track's centre as a percentage of the board box (token
-// placement).
+// (Design system v2 §03) Corner is ~1.35x a side tile — grid-template
+// uses `fr` units directly (1.35fr / 1fr x9 / 1.35fr) so the browser
+// distributes track width natively; CORNER_TRACK_PCT/EDGE_TRACK_PCT below
+// are the same ratio expressed as percentages, needed wherever token
+// placement and font-size scaling can't use `fr` (absolute positioning,
+// cqw-based clamp()).
 // ============================================================================
 
-const CORNER_TRACK_PCT = 13.2;
-const EDGE_TRACK_PCT = 8.2;
+const CORNER_RATIO = 1.35;
+const EDGE_RATIO = 1;
+const TOTAL_RATIO = CORNER_RATIO * 2 + EDGE_RATIO * 9; // 11.7 — one tile-width unit
+const CORNER_TRACK_PCT = (CORNER_RATIO / TOTAL_RATIO) * 100;
+const EDGE_TRACK_PCT = (EDGE_RATIO / TOTAL_RATIO) * 100;
 const TRACKS = [CORNER_TRACK_PCT, ...Array(9).fill(EDGE_TRACK_PCT), CORNER_TRACK_PCT];
-const GRID_TEMPLATE = `${CORNER_TRACK_PCT}% repeat(9, ${EDGE_TRACK_PCT}%) ${CORNER_TRACK_PCT}%`;
+const GRID_TEMPLATE = `${CORNER_RATIO}fr repeat(9, ${EDGE_RATIO}fr) ${CORNER_RATIO}fr`;
 
 // `track` is 1-indexed to match the grid-line numbering `gridPosition`
 // already returns (so callers don't have to remember to subtract 1).
@@ -85,22 +88,101 @@ function centerPercent(index: number): { left: number; top: number } {
   return { left: trackCenterPercent(col), top: trackCenterPercent(row) };
 }
 
-// This is a single-viewer screen board, not a physical table with players
-// on every side — so unlike a real board, the top row reads normally too.
-// Only the side columns rotate, purely so a longer name fits a narrow
-// tall cell by running along the column instead of being squeezed
-// horizontally.
-const ROTATION: Record<Edge, number> = { bottom: 0, left: 90, top: 0, right: -90, corner: 0 };
+// (Design system v2 §03) Rotate the tile's entire content container as one
+// rigid unit — never individual text nodes, which is what let two edges'
+// labels overlap before. Top gets rotate(180deg): on a physical table
+// every edge's text faces its own side of the board, not the single
+// overhead camera this app renders from. 180deg needs no dimension swap
+// (a flip, not a quarter-turn); 90/-90 do (see ROTATED_CONTENT_*_PCT).
+const ROTATION: Record<Edge, number> = { bottom: 0, left: 90, top: 180, right: -90, corner: 0 };
 
-// (Fix A) Left/right cells are landscape boxes (13.2% wide x 8.2% tall —
-// depth runs along the width, since that's the outward direction from the
+function needsDimensionSwap(rotation: number): boolean {
+  return rotation === 90 || rotation === -90;
+}
+
+// Left/right cells are landscape boxes (corner-ratio wide x edge-ratio
+// tall — depth runs along the width, the outward direction from the
 // board's centre). Rotating their content 90deg to read along the ring
 // means the CONTENT needs a portrait box (dimensions swapped) before
-// rotation, or it overflows the cell's actual (landscape) bounds. Top/
-// bottom/corner never rotate, so they never need this — see
-// `barGoesFirst` for why only edge orientation, not rotation, varies there.
+// rotation, or it overflows the cell's actual (landscape) bounds.
 const ROTATED_CONTENT_WIDTH_PCT = (EDGE_TRACK_PCT / CORNER_TRACK_PCT) * 100;
 const ROTATED_CONTENT_HEIGHT_PCT = (CORNER_TRACK_PCT / EDGE_TRACK_PCT) * 100;
+
+// ============================================================================
+// tile typography — every size below is `X px at the design review's own
+// true-size reference tile (82px wide desktop)`, re-expressed as cqw
+// against EDGE_TRACK_PCT (1 edge-tile-width, in percent of the whole
+// board) so it scales fluidly with actual board size while landing on
+// the exact reference numbers at a full-size board. Floored so it never
+// goes unreadable on a small board, ceilinged at the reference value so
+// it never overshoots it on a huge one. This is authoring-time-computed
+// tiering (three fixed buckets by character count), not runtime
+// measurement — see SpaceLines on Space.
+// ============================================================================
+
+const REFERENCE_TILE_PX = 82;
+
+// EDGE_TRACK_PCT is a pure ratio (corner:edge = 1.35:1) and doesn't know
+// about the grid's own `gap` — 10 gutters (11 columns) at
+// var(--board-grid-gap) each, real pixels the fr-based
+// grid-template-columns subtracts *before* distributing the rest, that a
+// plain percentage/cqw calculation never sees. Rather than a flat fudge
+// factor (wrong at every board size except the one it was tuned against),
+// subtract the true gutter total in the calc() itself — `(100cqw -
+// GAP_TOTAL_PX) * ratio` — so a tile's text is sized against its actual
+// rendered width at any board size, not the board's raw width.
+const GUTTER_COUNT = 10; // 11 columns -> 10 gutters
+const GAP_PX = 3; // matches --board-grid-gap (globals.css)
+const GAP_TOTAL_PX = GUTTER_COUNT * GAP_PX;
+
+// A second, smaller margin beyond the gap subtraction above — kerning
+// and sub-pixel rounding in the actual rendered glyphs versus this
+// coefficient's idealised math consistently want a little more room than
+// the arithmetic alone predicts. Tuned against the longest real lines
+// across all 5 maps (e.g. "CORPORATION", "NASSARAWA GRA"), not a single
+// board size, since it's a multiplicative fraction of the same
+// cqw-based fluid term everything else already scales with.
+const RENDER_SAFETY = 0.8;
+
+function fluidPx(pxAtReference: number, minPx: number, scale = 1): string {
+  const coefficient = (pxAtReference / REFERENCE_TILE_PX) * (EDGE_TRACK_PCT / 100) * scale * RENDER_SAFETY;
+  const fluid = `calc((100cqw - ${GAP_TOTAL_PX}px) * ${coefficient})`;
+  return `clamp(${minPx * scale}px, ${fluid}, ${pxAtReference * scale}px)`;
+}
+
+// ≤7 chars -> 15px · 8-11 chars -> 13px · 12+ chars -> 11.5px. Fixed
+// three-tier lookup by the line's own character count — never computed
+// from a measured render.
+function nameLineFontSize(line: string, scale = 1): string {
+  if (line.length <= 7) return fluidPx(15, 8.5, scale);
+  if (line.length <= 11) return fluidPx(13, 7, scale);
+  return fluidPx(11.5, 6.3, scale);
+}
+
+const PLATE_HEIGHT = fluidPx(15, 10);
+const PLATE_FONT = fluidPx(6.5, 5);
+const STATE_FONT = fluidPx(8.5, 7);
+const CORNER_SCALE = CORNER_RATIO; // corners get proportionally more room than an edge tile
+
+// Elevation (design system v2 §02): 1px light top edge + soft downward
+// shadow — the "object, not a flat rectangle" quality. Fixed px, not
+// scaled with tile size (shadows this small don't read as bigger/smaller
+// meaningfully at these sizes, and a scaled blur radius is more likely to
+// look wrong than right).
+const TILE_ELEVATION = "inset 0 1px 0 rgba(255,255,255,.08), 0 1px 0 rgba(0,0,0,.45), 0 4px 10px -6px rgba(0,0,0,.7)";
+
+// Only "yellow" (Amber) is light enough to need dark ink on its plate —
+// every other fixed region colour (including the borderline "Lagoon"
+// cyan) reads fine with white. See maps/types.ts for how these map to
+// the fixed 8-colour palette, and globals.css for the actual hex values.
+const DARK_INK_REGIONS = new Set<ColorGroup>(["yellow"]);
+
+// Transport/utility spaces don't belong to any of the 8 property regions
+// (see maps.test.ts — regions cover exactly the 22 property spaces), so
+// they can't inherit a region colour for their plate — see
+// --color-plate-transport/-utility in globals.css.
+const TRANSPORT_PLATE_COLOR = "var(--color-plate-transport)";
+const UTILITY_PLATE_COLOR = "var(--color-plate-utility)";
 
 // ============================================================================
 // step-by-step token movement — a short hop (<=12 spaces, either direction)
@@ -242,42 +324,124 @@ function describeSpace(space: Space, ownership: GameState["ownership"], players:
   return parts.join(", ");
 }
 
-function SpaceBar({ color }: { color: string }) {
-  // .board-space-bar: heritage adds a black rule beneath the strip (see
-  // globals.css) — Board.tsx never checks which theme is active, it just
-  // always emits this class and lets the ambient [data-theme] scope decide
-  // whether that rule exists.
-  return <div className="board-space-bar h-[clamp(4px,1.9cqw,15px)] w-full shrink-0" style={{ backgroundColor: color }} />;
-}
+// ============================================================================
+// the signboard tile — plate (region colour, full saturation) -> name
+// block (pre-authored lines, tiered by length) -> state slot (one of
+// unowned/owned/mortgaged). Governing rule: only the plate runs at full
+// saturation; everything below it gives way.
+// ============================================================================
 
-function HousePips({ houses, hotel, barColor }: { houses: number; hotel: boolean; barColor: string }) {
+function PlatePips({ houses, hotel }: { houses: number; hotel: boolean }) {
   if (hotel) {
     return (
-      <div className="flex shrink-0 justify-center py-0.5">
-        <div className="h-2.5 w-4 rounded-[2px]" style={{ backgroundColor: barColor }} />
+      <div className="flex h-full items-center justify-center">
+        <div className="h-[55%] w-[45%] rounded-[1px] bg-white/95" />
       </div>
     );
   }
-  if (houses === 0) return null;
   return (
-    <div className="flex shrink-0 justify-center gap-0.5 py-0.5">
+    <div className="flex h-full items-center justify-center gap-[2px]">
       {Array.from({ length: houses }).map((_, i) => (
-        <div key={i} className="h-1.5 w-1.5 rounded-[1px] bg-accent" />
+        <div key={i} className="h-[35%] w-[12%] rounded-[1px] bg-white/95" />
       ))}
     </div>
   );
 }
 
-// "Saturated colour bars flush at each space's outer edge" (Section G) —
-// the outer edge for each screen edge is a different physical side of the
-// cell (bottom row -> screen-bottom, left column -> screen-left, etc), so
-// which end of the pre-rotation flex column the bar sits at has to vary:
-// full-bleed (no padding) at the "top" end for the top row (its outward
-// edge is already screen-up, unrotated per the earlier rotation decision)
-// and at the "bottom" end for bottom/left/right, whose rotation/geometry
-// puts pre-rotation-bottom on their respective outward screen edge.
-function barGoesFirst(edge: Edge): boolean {
-  return edge === "top";
+function Plate({
+  color,
+  ink,
+  label,
+  houses,
+  hotel,
+  dimmed,
+}: {
+  color: string;
+  ink: string;
+  label: string;
+  houses: number;
+  hotel: boolean;
+  dimmed: boolean;
+}) {
+  const showPips = houses > 0 || hotel;
+  return (
+    <div
+      className={`flex w-full shrink-0 items-center justify-center overflow-hidden px-1 ${ink}`}
+      style={{ height: PLATE_HEIGHT, backgroundColor: color, opacity: dimmed ? 0.85 : 1 }}
+    >
+      {showPips ? (
+        <PlatePips houses={houses} hotel={hotel} />
+      ) : (
+        <span
+          className="truncate font-semibold tracking-[0.13em] uppercase"
+          style={{
+            fontSize: PLATE_FONT,
+            fontFamily: "var(--font-archivo)",
+            // fontStretch alongside fontVariationSettings, not one or the
+            // other: for an axis with a standard CSS property (wdth <->
+            // font-stretch), browsers can let an unset/normal font-stretch
+            // win over a 'wdth' in font-variation-settings, silently
+            // rendering at the font's default (uncondensed) width — which
+            // is exactly wide enough to blow past a tile's actual text
+            // budget. Setting both keeps them from disagreeing.
+            fontStretch: "74%",
+            fontVariationSettings: "'wdth' 74, 'wght' 700",
+          }}
+        >
+          {label}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function NameBlock({ lines, scale = 1 }: { lines: readonly string[]; scale?: number }) {
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-0 overflow-hidden px-0.5 py-0.5 text-center">
+      {lines.map((line, i) => (
+        <span
+          key={i}
+          className="board-space-name w-full truncate leading-[1.15] font-bold tracking-[0.005em] text-board-ink/88 uppercase"
+          style={{
+            fontSize: nameLineFontSize(line, scale),
+            fontFamily: "var(--font-archivo)",
+            // See Plate's comment on fontStretch — same reasoning here.
+            fontStretch: "76%",
+            fontVariationSettings: "'wdth' 76, 'wght' 750",
+          }}
+        >
+          {line}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function StateSlotText({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="w-full shrink-0 truncate border-t border-board-ink/[0.14] text-center tabular-nums text-board-ink/42"
+      style={{ fontSize: STATE_FONT, paddingTop: "2px", paddingBottom: "2px" }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function stateSlotFor(space: Space, state: GameState, own: PropertyOwnership | undefined): React.ReactNode {
+  if (space.type === "property" || space.type === "transport" || space.type === "utility") {
+    if (!own) return <StateSlotText>{formatCAD(space.price)}</StateSlotText>;
+    if (own.mortgaged) return <StateSlotText>Mortgaged</StateSlotText>;
+    const rent =
+      space.type === "property"
+        ? computePropertyRent(state, space, own)
+        : space.type === "transport"
+          ? computeTransportRent(state, own.ownerId)
+          : computeUtilityRent(state, own.ownerId);
+    return <StateSlotText>Rent {formatCAD(rent)}</StateSlotText>;
+  }
+  if (space.type === "tax") return <StateSlotText>{formatCAD(space.amount)}</StateSlotText>;
+  return null;
 }
 
 function BoardSpace({
@@ -294,63 +458,91 @@ function BoardSpace({
   const { row, col } = gridPosition(space.index);
   const edge = edgeForIndex(space.index);
   const rotation = ROTATION[edge];
+  const swap = needsDimensionSwap(rotation);
   const ownable = space.type === "property" || space.type === "transport" || space.type === "utility";
   const own = ownable ? state.ownership[space.index] : undefined;
   const owner = own ? state.players.find((p) => p.id === own.ownerId) : undefined;
-  const barColor = space.type === "property" ? COLOR_GROUP_VAR[space.color] : undefined;
+  const ownerColor = owner ? PLAYER_TOKEN_COLOR[owner.token] : undefined;
+  const mortgaged = Boolean(own?.mortgaged);
+
+  const plateColor =
+    space.type === "property"
+      ? COLOR_GROUP_VAR[space.color]
+      : space.type === "transport"
+        ? TRANSPORT_PLATE_COLOR
+        : space.type === "utility"
+          ? UTILITY_PLATE_COLOR
+          : undefined;
+  const plateInk = space.type === "property" && DARK_INK_REGIONS.has(space.color) ? "text-board-ink/86" : "text-white";
+  const regionLabel =
+    space.type === "property" || space.type === "transport" || space.type === "utility" ? (space.regionLabel ?? "") : "";
 
   const label = describeSpace(space, state.ownership, state.players);
-
-  const bar = barColor ? <SpaceBar color={barColor} /> : null;
-  const content = (
-    // min-w-0/min-h-0 down this whole chain is load-bearing, not
-    // decorative: a flex item's default min-width/min-height is `auto`
-    // (its content's natural, unwrapped/unclamped size), not 0 — so
-    // without it, line-clamp never gets a chance to actually constrain
-    // anything: the name sizes itself to its full unwrapped width/height,
-    // blows past the cell, and only then gets hard-clipped by the cell's
-    // own overflow-hidden. That reads as text missing from both ends
-    // horizontally, or the price shoved out below the cell's bottom edge
-    // vertically — both symptoms of the same root cause.
-    //
-    // The name gets the flexible vertical space (absorbing whatever room
-    // is left after the bar and price, both shrink-0 below), but that
-    // flex-grow has to live on a WRAPPER div around the clamped span, not
-    // on the span itself: -webkit-line-clamp (which line-clamp-4 uses)
-    // measures unreliably on an element that is ALSO `flex: 1 1 0%` —
-    // Chromium/WebKit compute its box against a zero flex-basis before
-    // content is measured, so the clamp silently stops limiting anything
-    // and the name overflows its own line-clamp box. Giving the WRAPPER
-    // the flex-grow (ordinary flex-basis: auto — no conflict) and leaving
-    // the span a plain non-flex child inside it sidesteps that entirely.
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-0 overflow-hidden p-0 text-center">
-      <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden">
-        {/* line-clamp-6: NOT a design choice about how many lines a name
-            "should" take — the wrapper's own flex-1 + overflow-hidden is
-            what actually bounds it. This cap only needs to sit above
-            whatever the longest real name ever needs, so it never becomes
-            the reason a line goes missing (the earlier line-clamp-5 was
-            doing exactly that for "Murtala Muhammed Airport": the wrapper
-            had a 6th line's worth of room sitting unused, capped off by
-            an arbitrary "5"). */}
-        <span className="board-space-name line-clamp-6 min-h-0 min-w-0 [overflow-wrap:anywhere] text-[clamp(8px,1.9cqw,18px)] leading-[1] font-semibold tracking-normal text-board-ink uppercase">
-          {space.name}
-        </span>
-      </div>
-      {space.type === "property" || space.type === "transport" || space.type === "utility" ? (
-        <span className="board-price min-w-0 shrink-0 leading-[1.1] text-[clamp(8px,1.7cqw,15px)] tabular-nums text-board-ink/60">{formatCAD(space.price)}</span>
-      ) : space.type === "tax" ? (
-        <span className="board-price min-w-0 shrink-0 leading-[1.1] text-[clamp(8px,1.7cqw,15px)] tabular-nums text-board-ink/60">{formatCAD(space.amount)}</span>
-      ) : null}
-      {own && !own.mortgaged && space.type === "property" && (
-        <HousePips houses={own.houses} hotel={own.hotel} barColor={barColor!} />
-      )}
-    </div>
-  );
 
   function inspect() {
     onInspect?.(space.index);
   }
+
+  // Ownership (rank 2 in the hierarchy, after the tokens themselves): a
+  // saturated inset ring in the owner's colour plus a faint wash across
+  // the whole face — box-shadow rather than a border, so it composes
+  // cleanly with the tile's own elevation shadow instead of fighting it.
+  const boxShadow = ownerColor ? `inset 0 0 0 2.5px ${ownerColor}, ${TILE_ELEVATION}` : TILE_ELEVATION;
+
+  const content = (
+    <div
+      className={`flex min-h-0 min-w-0 flex-col ${swap ? "" : "h-full w-full"} ${
+        edge === "corner" ? "h-full w-full items-center justify-center gap-1 p-1 text-center" : ""
+      }`}
+      style={{
+        ...(swap
+          ? {
+              position: "absolute",
+              left: "50%",
+              top: "50%",
+              width: `${ROTATED_CONTENT_WIDTH_PCT}%`,
+              height: `${ROTATED_CONTENT_HEIGHT_PCT}%`,
+              transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+            }
+          : rotation
+            ? { transform: `rotate(${rotation}deg)` }
+            : undefined),
+      }}
+    >
+      {edge === "corner" ? (
+        <>
+          <span className="shrink-0 text-[clamp(18px,3.6cqw,30px)] leading-none">{cornerIcon(space)}</span>
+          <NameBlock lines={space.lines} scale={CORNER_SCALE} />
+          {/* Always rendered for the jail corner (a space-type branch,
+              not a theme branch) — modern's CSS leaves it visually
+              unified with the rest of the corner, heritage tints it as
+              a distinct strip. See .board-jail-visiting in globals.css. */}
+          {space.type === "jail" && (
+            <span className="board-jail-visiting w-full shrink-0 rounded-[2px] px-1 py-0.5 text-[6px] leading-none tracking-wide text-board-ink/60 uppercase">
+              Just visiting
+            </span>
+          )}
+        </>
+      ) : (
+        <>
+          {plateColor && (
+            <Plate
+              color={plateColor}
+              ink={plateInk}
+              label={regionLabel}
+              houses={own?.hotel ? 0 : (own?.houses ?? 0)}
+              hotel={own?.hotel ?? false}
+              dimmed={Boolean(own)}
+            />
+          )}
+          <div className={mortgaged ? "line-through decoration-1" : undefined}>
+            <NameBlock lines={space.lines} />
+          </div>
+          {stateSlotFor(space, state, own)}
+        </>
+      )}
+    </div>
+  );
 
   return (
     <div
@@ -364,72 +556,25 @@ function BoardSpace({
           inspect();
         }
       }}
-      className={`relative flex cursor-pointer overflow-hidden rounded-[3px] bg-board outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+      className={`board-tile-rule relative flex cursor-pointer overflow-hidden rounded-[5px] bg-board outline-none focus-visible:ring-2 focus-visible:ring-accent ${
         edge === "corner" ? "items-center justify-center" : ""
-      } ${highlighted ? "z-20 ring-4 ring-accent animate-pulse" : ""}`}
-      style={{ gridRow: row, gridColumn: col }}
+      } ${highlighted ? "z-20 ring-4 ring-accent animate-pulse" : ""} ${mortgaged ? "opacity-[.58]" : ""}`}
+      style={{ gridRow: row, gridColumn: col, boxShadow }}
     >
-      {own?.mortgaged && (
+      {ownerColor && (
         <div
-          className="pointer-events-none absolute inset-0 z-10 bg-board/70"
-          style={{
-            backgroundImage:
-              "linear-gradient(to top right, transparent calc(50% - 1px), var(--color-danger) 50%, transparent calc(50% + 1px))",
-          }}
+          className="pointer-events-none absolute inset-0 z-0"
+          style={{ backgroundColor: ownerColor, opacity: 0.11 }}
+          aria-hidden="true"
         />
       )}
 
-      <div
-        className={`flex min-w-0 min-h-0 flex-col ${rotation ? "" : "h-full w-full"} ${
-          edge === "corner" ? "h-full w-full items-center justify-center gap-1 text-center" : ""
-        }`}
-        style={{
-          ...(rotation
-            ? {
-                position: "absolute",
-                left: "50%",
-                top: "50%",
-                width: `${ROTATED_CONTENT_WIDTH_PCT}%`,
-                height: `${ROTATED_CONTENT_HEIGHT_PCT}%`,
-                transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
-              }
-            : undefined),
-          ...(edge === "corner" ? { padding: "var(--board-corner-padding)" } : undefined),
-        }}
-      >
-        {edge === "corner" ? (
-          <>
-            <span className="shrink-0 text-[clamp(18px,3.6cqw,30px)] leading-none">{cornerIcon(space)}</span>
-            <span className="board-space-name line-clamp-3 min-h-0 min-w-0 [overflow-wrap:anywhere] text-[clamp(13px,2.7cqw,21px)] leading-tight font-semibold tracking-wide text-board-ink uppercase">
-              {space.name}
-            </span>
-            {/* Always rendered for the jail corner (a space-type branch,
-                not a theme branch) — modern's CSS leaves it visually
-                unified with the rest of the corner, heritage tints it as
-                a distinct strip. See .board-jail-visiting in globals.css. */}
-            {space.type === "jail" && (
-              <span className="board-jail-visiting w-full rounded-[2px] px-1 py-0.5 text-[6px] leading-none tracking-wide text-board-ink/60 uppercase">
-                Just visiting
-              </span>
-            )}
-          </>
-        ) : barGoesFirst(edge) ? (
-          <>
-            {bar}
-            {content}
-          </>
-        ) : (
-          <>
-            {content}
-            {bar}
-          </>
-        )}
-      </div>
+      <div className="relative z-[1] flex h-full w-full flex-col">{content}</div>
 
       {owner && (
         <span
           className="absolute top-0.5 right-0.5 z-20 h-2 w-2 rounded-full ring-1 ring-board"
-          style={{ backgroundColor: PLAYER_TOKEN_COLOR[owner.token] }}
+          style={{ backgroundColor: ownerColor }}
           aria-hidden="true"
         />
       )}
@@ -514,11 +659,10 @@ export function Board({ state, className, onInspect, game, session, dispatch, mu
         <div
           role="grid"
           aria-label="Game board"
-          // (Fix 1) bg-canvas, not bg-board-line: each tile needs to read
-          // as its own discrete object sitting on the darker felt table,
-          // not a slab with hairline rules — the actual table colour
-          // showing through the (now 3px) gaps is what sells that,
-          // matched by rounded corners on each tile below.
+          // Discrete tiles, not a continuous slab: the actual felt/table
+          // colour shows through these (3px) gaps, and each tile below
+          // is independently rounded — that separation is what reads as
+          // "objects on felt" rather than a document with grid lines.
           className="grid h-full w-full bg-canvas"
           style={{ gap: "var(--board-grid-gap)", gridTemplateColumns: GRID_TEMPLATE, gridTemplateRows: GRID_TEMPLATE }}
         >
@@ -535,8 +679,8 @@ export function Board({ state, className, onInspect, game, session, dispatch, mu
               primary turn controls now (Section 4d), and would otherwise
               fall through to the grid's own background (bg-canvas, the
               dark felt table colour that shows through the gaps between
-              tiles — see Fix 1 above), turning the whole centre into a
-              dark void without this explicit bg-board fill. */}
+              tiles), turning the whole centre into a dark void without
+              this explicit bg-board fill. */}
           <div
             ref={setBoardCenterSlot}
             className="relative flex items-center justify-center overflow-hidden bg-board"
