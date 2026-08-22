@@ -43,6 +43,11 @@
   --color-danger: #e5484d;
   --color-gold: #c9a227; /* Treasure */
   --color-magenta: #d6407f; /* Surprise */
+  /* A stable "money went up" green, independent of --color-accent — task 9
+     retargets accent to danfo yellow, and a cash-gain flash shouldn't
+     follow that swap (yellow means "you can act", not "you gained
+     money"). AnimatedMoney.tsx is the only consumer. */
+  --color-gain: #00a859;
 
   /* Board frame — the ONLY three variables a map may change, and only
      inside a [data-map-id] scope (see below). These :root values are
@@ -136,10 +141,13 @@
   --color-accent-foreground: var(--color-accent-foreground);
   --color-danger: var(--color-danger);
   --color-gold: var(--color-gold);
+  --color-gain: var(--color-gain);
   --color-magenta: var(--color-magenta);
   --color-board: var(--color-board);
   --color-board-line: var(--color-board-line);
   --color-board-ink: var(--color-board-ink);
+  --color-hair: var(--hair);
+  --color-hair-2: var(--hair2);
   --font-sans: var(--font-inter);
   --font-mono: var(--font-geist-mono);
   --font-archivo: var(--font-archivo);

@@ -66,7 +66,7 @@ export function ChatPanel({ roomCode, session, players, messages }: ChatPanelPro
   }
 
   return (
-    <div className="flex h-48 flex-col gap-2">
+    <div className="flex h-72 flex-col gap-2">
       <div
         ref={scrollRef}
         role="log"
@@ -105,6 +105,9 @@ export function ChatPanel({ roomCode, session, players, messages }: ChatPanelPro
 
       {session ? (
         <>
+          {/* (Task 8) The reaction row used to take as much height as the
+              chat log itself — shrunk to a single dense strip so the log
+              gets the room instead. */}
           <div className="flex gap-1">
             {REACTIONS.map((word) => (
               <button
@@ -112,7 +115,7 @@ export function ChatPanel({ roomCode, session, players, messages }: ChatPanelPro
                 type="button"
                 onClick={() => void send(word)}
                 disabled={sending}
-                className="flex-1 rounded-full bg-surface-2 py-1 text-[11px] font-semibold tracking-wide text-ink hover:bg-white/10 disabled:opacity-40"
+                className="flex-1 rounded-full bg-surface-2 py-0.5 text-[10px] font-semibold tracking-wide text-ink hover:bg-white/10 disabled:opacity-40"
               >
                 {word}
               </button>
