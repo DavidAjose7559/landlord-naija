@@ -104,7 +104,6 @@ export const originalMap: GameMap = {
   id: "original",
   name: "Original",
   tagline: "The vintage board, our streets.",
-  flagEmoji: "🎲",
   theme: "heritage",
   currency: "CAD",
   jailLabel: "Jail",

@@ -50,9 +50,15 @@ export default function BoardPage() {
             onClick={() => setMuted((m) => !m)}
             aria-pressed={!muted}
             aria-label={muted ? "Unmute dice sound" : "Mute dice sound"}
-            className="rounded-full bg-surface-2 px-3 py-1.5 text-xs text-ink"
+            className="rounded-full bg-surface-2 p-2 text-ink"
           >
-            {muted ? "🔇" : "🔊"}
+            {/* (Task 3) Drawn speaker glyph, not an emoji — a muted/x
+                variant and an unmuted/waves variant sharing the same
+                speaker body. */}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+              <path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" stroke="none" />
+              {muted ? <path d="M16 9l5 6M21 9l-5 6" /> : <path d="M15.5 9a4 4 0 010 6M18.5 6.5a8 8 0 010 11" />}
+            </svg>
           </button>
           <Link href={`/game/${roomCode}/verify`} className="text-xs font-medium text-accent hover:brightness-110">
             Fairness →

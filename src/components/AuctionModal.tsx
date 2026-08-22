@@ -20,12 +20,6 @@ interface AuctionModalProps {
 
 const QUICK_BID_STEPS_CENTS = [200, 1_000, 10_000]; // +$2 / +$10 / +$100
 
-function spaceIcon(type: string): string {
-  if (type === "transport") return "🚉";
-  if (type === "utility") return "💡";
-  return "🏠";
-}
-
 const RENT_TIER_LABELS = ["Base", "1 house", "2 houses", "3 houses", "4 houses", "Hotel"];
 
 // (Section 3) Full rebuild: a centred modal visible to every player at
@@ -109,7 +103,6 @@ export function AuctionModal({ game, session, dispatch }: AuctionModalProps) {
   return (
     <Modal ariaLabel={`Auction for ${space.name}`} className="max-w-2xl">
       <div className="flex flex-col items-center gap-1 text-center">
-        <span className="text-3xl leading-none">{spaceIcon(space.type)}</span>
         <h2 className="text-lg font-bold text-ink">{space.name}</h2>
         {"price" in space && <p className="text-xs text-muted">List price {formatCAD(space.price)}</p>}
       </div>

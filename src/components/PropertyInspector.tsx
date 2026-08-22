@@ -428,12 +428,7 @@ function PropertyBody({
     <div className="flex flex-col gap-4">
       <div className="h-2 w-full rounded-full" style={{ backgroundColor: barColor }} />
 
-      {region && (
-        <p className="-mt-2 text-xs text-muted">
-          {region.flagEmoji ? `${region.flagEmoji} ` : ""}
-          {region.name}
-        </p>
-      )}
+      {region && <p className="-mt-2 text-xs text-muted">{region.name}</p>}
 
       <Row label="List price" value={<Money cents={space.price} />} />
 

@@ -7,7 +7,11 @@ import type { PlayerSession } from "@/lib/session";
 import { PLAYER_TOKEN_COLOR } from "@/lib/tokens";
 import { TokenIcon } from "./TokenIcon";
 
-const REACTIONS = ["👍", "😂", "😭", "💀", "🔥"];
+// (Task 3) Short words, not emoji — the button label IS the message body
+// that gets sent and displayed in the thread, so an emoji here wouldn't
+// just be a decorative icon, it'd be device-inconsistent text sitting
+// permanently in the chat log.
+const REACTIONS = ["+1", "LOL", "NOOO", "DEAD", "LIT"];
 
 interface ChatPanelProps {
   roomCode: string;
@@ -102,15 +106,15 @@ export function ChatPanel({ roomCode, session, players, messages }: ChatPanelPro
       {session ? (
         <>
           <div className="flex gap-1">
-            {REACTIONS.map((emoji) => (
+            {REACTIONS.map((word) => (
               <button
-                key={emoji}
+                key={word}
                 type="button"
-                onClick={() => void send(emoji)}
+                onClick={() => void send(word)}
                 disabled={sending}
-                className="flex-1 rounded-full bg-surface-2 py-1 text-base hover:bg-white/10 disabled:opacity-40"
+                className="flex-1 rounded-full bg-surface-2 py-1 text-[11px] font-semibold tracking-wide text-ink hover:bg-white/10 disabled:opacity-40"
               >
-                {emoji}
+                {word}
               </button>
             ))}
           </div>

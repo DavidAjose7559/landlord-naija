@@ -55,7 +55,6 @@ export function SettingsPanel({ game, isHost, roomCode, clientToken }: SettingsP
       </div>
 
       <SettingRow
-        icon={map.flagEmoji}
         title="Map"
         description={map.tagline}
         isHost={isHost}
@@ -72,7 +71,6 @@ export function SettingsPanel({ game, isHost, roomCode, clientToken }: SettingsP
       />
 
       <SettingRow
-        icon="👥"
         title="Max players"
         description="2 to 8 players per room"
         isHost={isHost}
@@ -93,7 +91,6 @@ export function SettingsPanel({ game, isHost, roomCode, clientToken }: SettingsP
       />
 
       <SettingRow
-        icon="🔒"
         title="Private room"
         description="Off = listed for anyone to find and join"
         isHost={isHost}
@@ -101,7 +98,6 @@ export function SettingsPanel({ game, isHost, roomCode, clientToken }: SettingsP
       />
 
       <SettingRow
-        icon="💵"
         title="Starting cash"
         description="How much every player starts with"
         isHost={isHost}
@@ -122,7 +118,6 @@ export function SettingsPanel({ game, isHost, roomCode, clientToken }: SettingsP
       />
 
       <SettingRow
-        icon="🔀"
         title="Randomize turn order"
         description="Off = seating order is turn order"
         isHost={isHost}
@@ -138,7 +133,6 @@ export function SettingsPanel({ game, isHost, roomCode, clientToken }: SettingsP
       <h2 className="mt-2 text-sm font-bold tracking-wide text-ink uppercase">Gameplay rules</h2>
 
       <SettingRow
-        icon="✌️"
         title="Double rent on full set"
         description="Unimproved rent doubles once you own a whole region"
         isHost={isHost}
@@ -152,7 +146,6 @@ export function SettingsPanel({ game, isHost, roomCode, clientToken }: SettingsP
       />
 
       <SettingRow
-        icon="🅿️"
         title="Free Parking jackpot"
         description="Tax and fee payments pool up, paid to whoever lands there"
         isHost={isHost}
@@ -162,7 +155,6 @@ export function SettingsPanel({ game, isHost, roomCode, clientToken }: SettingsP
       />
 
       <SettingRow
-        icon="⏭️"
         title="Free Parking skips a turn"
         description="Landing there makes you miss your next turn"
         isHost={isHost}
@@ -176,7 +168,6 @@ export function SettingsPanel({ game, isHost, roomCode, clientToken }: SettingsP
       />
 
       <SettingRow
-        icon="🔨"
         title="Auctions"
         description="Off = Buy or Decline, unbought stays with the bank. On = Buy or Auction, no plain decline."
         isHost={isHost}
@@ -190,7 +181,6 @@ export function SettingsPanel({ game, isHost, roomCode, clientToken }: SettingsP
       />
 
       <SettingRow
-        icon="🚔"
         title="Collect rent while jailed"
         description="Off = no rent owed to an owner currently in jail"
         isHost={isHost}
@@ -204,7 +194,6 @@ export function SettingsPanel({ game, isHost, roomCode, clientToken }: SettingsP
       />
 
       <SettingRow
-        icon="🏦"
         title="Mortgaging"
         description="Off = properties can never be mortgaged"
         isHost={isHost}
@@ -214,7 +203,6 @@ export function SettingsPanel({ game, isHost, roomCode, clientToken }: SettingsP
       />
 
       <SettingRow
-        icon="🏗️"
         title="Even build rule"
         description="Off = houses can be built unevenly within a region"
         isHost={isHost}
@@ -222,7 +210,6 @@ export function SettingsPanel({ game, isHost, roomCode, clientToken }: SettingsP
       />
 
       <SettingRow
-        icon="🏳️"
         title="Manual bankruptcy"
         description="On = players can quit and declare bankrupt any time"
         isHost={isHost}
@@ -236,7 +223,6 @@ export function SettingsPanel({ game, isHost, roomCode, clientToken }: SettingsP
       />
 
       <SettingRow
-        icon="📦"
         title="Bankruptcy transfers assets"
         description="Off = a bankrupt player's properties return to the bank instead"
         isHost={isHost}
@@ -250,7 +236,6 @@ export function SettingsPanel({ game, isHost, roomCode, clientToken }: SettingsP
       />
 
       <SettingRow
-        icon="🤝"
         title="Trading"
         description="Off = players can't propose trades"
         isHost={isHost}
@@ -260,7 +245,6 @@ export function SettingsPanel({ game, isHost, roomCode, clientToken }: SettingsP
       />
 
       <SettingRow
-        icon="⏱️"
         title="Turn time limit"
         description="Skip a player's turn if they take too long"
         isHost={isHost}
@@ -297,10 +281,9 @@ export function SettingsPanel({ game, isHost, roomCode, clientToken }: SettingsP
                 m.id === settings.mapId ? "bg-accent/20 ring-1 ring-accent" : "border border-white/8 bg-surface-2 hover:bg-white/10"
               }`}
             >
-              <MapThumbnail theme={m.theme} />
+              <MapThumbnail map={m} />
               <div className="flex flex-col gap-1">
                 <span className="flex items-center gap-2 text-sm font-semibold text-ink">
-                  <span className="text-lg">{m.flagEmoji}</span>
                   {m.name}
                   {m.theme === "heritage" && (
                     <span className="rounded-full bg-gold/20 px-2 py-0.5 text-[10px] font-medium tracking-wide text-gold uppercase">
@@ -309,9 +292,9 @@ export function SettingsPanel({ game, isHost, roomCode, clientToken }: SettingsP
                   )}
                 </span>
                 <span className="text-xs text-muted">{m.tagline}</span>
-                <span className="flex flex-wrap gap-1 pt-1 text-[11px] text-muted">
+                <span className="flex flex-wrap gap-x-1.5 gap-y-0.5 pt-1 text-[11px] text-muted">
                   {m.regions.map((r) => (
-                    <span key={r.id}>{r.flagEmoji ?? ""} {r.name}</span>
+                    <span key={r.id}>{r.name}</span>
                   ))}
                 </span>
               </div>
@@ -331,13 +314,11 @@ export function SettingsPanel({ game, isHost, roomCode, clientToken }: SettingsP
 }
 
 function SettingRow({
-  icon,
   title,
   description,
   isHost,
   control,
 }: {
-  icon: string;
   title: string;
   description: string;
   isHost: boolean;
@@ -345,7 +326,6 @@ function SettingRow({
 }) {
   return (
     <div className={`flex items-center gap-3 ${isHost ? "" : "opacity-60"}`}>
-      <span className="text-lg">{icon}</span>
       <div className="flex flex-1 flex-col">
         <span className="text-sm font-medium text-ink">{title}</span>
         <span className="text-xs text-muted">{description}</span>

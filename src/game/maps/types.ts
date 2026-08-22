@@ -12,14 +12,13 @@ export type MapId = "naija" | "worldTour" | "canada" | "classic" | "original";
 // look, used only by 'original'.
 export type MapTheme = "modern" | "heritage";
 
-// A region is the named, flagged successor to a bare "colour group" — but
-// it's still anchored to one of the 8 fixed colour slots (every map has
-// the identical 2/3/3/3/3/3/3/2 shape at the identical indices), so
+// A region is the named successor to a bare "colour group" — but it's
+// still anchored to one of the 8 fixed colour slots (every map has the
+// identical 2/3/3/3/3/3/3/2 shape at the identical indices), so
 // rendering/rent code keyed off ColorGroup keeps working unmodified.
 export interface GameMapRegion {
   id: ColorGroup;
   name: string;
-  flagEmoji?: string;
   spaceIndexes: readonly number[];
 }
 
@@ -42,7 +41,6 @@ export interface GameMap {
   id: MapId;
   name: string;
   tagline: string;
-  flagEmoji: string;
   theme: MapTheme;
   currency: "CAD";
   // Per-map flavour labels for the two universally-generic spaces/decks.

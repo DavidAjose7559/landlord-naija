@@ -199,7 +199,12 @@ export function BugReportButton() {
         title="Report a bug"
         className="fixed bottom-4 right-4 z-[60] flex h-10 w-10 items-center justify-center rounded-full bg-surface-2/90 text-base shadow-lg backdrop-blur transition-colors hover:bg-surface-2"
       >
-        🐛
+        {/* (Task 3) Drawn report/feedback glyph, not an emoji. */}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+          <path d="M4 5h16v10H9l-4 4v-4H4z" />
+          <rect x="11.1" y="7.8" width="1.6" height="4.2" fill="currentColor" stroke="none" />
+          <circle cx="11.9" cy="14.4" r="0.95" fill="currentColor" stroke="none" />
+        </svg>
       </button>
 
       {open && (

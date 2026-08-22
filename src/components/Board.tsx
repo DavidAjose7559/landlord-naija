@@ -511,7 +511,7 @@ function BoardSpace({
     >
       {edge === "corner" ? (
         <>
-          <span className="shrink-0 text-[clamp(18px,3.6cqw,30px)] leading-none">{cornerIcon(space)}</span>
+          <CornerIcon space={space} className="h-[clamp(18px,3.6cqw,30px)] w-[clamp(18px,3.6cqw,30px)] shrink-0" />
           <NameBlock lines={space.lines} scale={CORNER_SCALE} />
           {/* Always rendered for the jail corner (a space-type branch,
               not a theme branch) — modern's CSS leaves it visually
@@ -582,19 +582,61 @@ function BoardSpace({
   );
 }
 
-function cornerIcon(space: Space): string {
-  switch (space.type) {
-    case "go":
-      return "➜";
-    case "jail":
-      return "🚔";
-    case "free":
-      return "🅿️";
-    case "gotojail":
-      return "🚨";
-    default:
-      return "";
-  }
+// (Task 3) Drawn, not emoji — flat currentColor vectors matching the
+// player tokens' own art style, on the same 24x24 grid.
+function CornerIcon({ space, className }: { space: Space; className?: string }) {
+  const shape = (() => {
+    switch (space.type) {
+      case "go":
+        return (
+          <path
+            d="M4 12h13M12 5l7 7-7 7"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        );
+      case "jail":
+        return (
+          <>
+            <rect x="4" y="4" width="16" height="16" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+            <rect x="8.1" y="4" width="1.8" height="16" />
+            <rect x="14.1" y="4" width="1.8" height="16" />
+          </>
+        );
+      case "free":
+        return (
+          <>
+            <rect x="3" y="3" width="18" height="18" rx="4" fill="none" stroke="currentColor" strokeWidth="1.8" />
+            <path
+              d="M9.3 17V7h3.7a3 3 0 010 6H9.3"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinejoin="round"
+            />
+          </>
+        );
+      case "gotojail":
+        return (
+          <>
+            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.8" />
+            <rect x="11" y="6.5" width="2" height="7" rx="1" />
+            <circle cx="12" cy="16.5" r="1.2" />
+          </>
+        );
+      default:
+        return null;
+    }
+  })();
+  if (!shape) return null;
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" className={className}>
+      {shape}
+    </svg>
+  );
 }
 
 // The client only ever sees the post-move GameState (no event-stream

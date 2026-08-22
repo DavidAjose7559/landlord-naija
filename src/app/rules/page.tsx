@@ -48,7 +48,7 @@ export default function RulesPage() {
           <span className="font-medium text-ink">Naija Edition</span> — Lagos, Abuja, Enugu, Port Harcourt, Ibadan,
           Kano and beyond, with Owambe and Village People cards.{" "}
           <span className="font-medium text-ink">World Tour</span> — each colour group is its own country
-          (🇳🇬🇬🇭🇿🇦🇧🇷🇬🇧🇫🇷🇨🇦🇺🇸).{" "}
+          (Nigeria, Ghana, South Africa, Brazil, UK, France, Canada, US).{" "}
           <span className="font-medium text-ink">Canada</span> — provinces and territories, Toronto anchoring the
           top group. <span className="font-medium text-ink">Classic</span> — the familiar board, generically
           renamed. <span className="font-medium text-ink">Original</span> — period street names on a vintage,

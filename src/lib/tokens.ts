@@ -53,19 +53,6 @@ export const PLAYER_TOKEN_LABEL: Record<PlayerToken, string> = {
   iron: "Iron",
 };
 
-// Naija tokens render as emoji; classic tokens render as original SVG
-// silhouettes (see TokenIcon.tsx) — this map only covers the former.
-export const PLAYER_TOKEN_EMOJI: Record<NaijaToken, string> = {
-  danfo: "🚌",
-  keke: "🛺",
-  jollof: "🍚",
-  gele: "🧕",
-  okada: "🏍️",
-  agbada: "🥻",
-  suya: "🍢",
-  bottle: "🍾",
-};
-
 // Distinct per-token colour used for ownership dots on the board and
 // token accents — not the same palette as property colour groups, so the
 // two never get confused at a glance.

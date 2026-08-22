@@ -101,7 +101,6 @@ export const worldTourMap: GameMap = {
   id: "worldTour",
   name: "World Tour",
   tagline: "Eight countries. One board.",
-  flagEmoji: "🌍",
   theme: "modern",
   currency: "CAD",
   jailLabel: "Jail",

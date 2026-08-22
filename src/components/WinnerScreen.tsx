@@ -88,7 +88,7 @@ export function WinnerScreen({ game, roomCode }: WinnerScreenProps) {
 
   function handleCopyResult() {
     const lines = [
-      `🏆 ${winner?.name ?? "A player"} wins Landlord Naija! (Room ${roomCode})`,
+      `${winner?.name ?? "A player"} wins Landlord Naija! (Room ${roomCode})`,
       "",
       "Final standings:",
       ...standings.map((s, i) => `${i + 1}. ${s.player.name} — ${formatCAD(s.breakdown.totalCents)}`),
@@ -115,9 +115,7 @@ export function WinnerScreen({ game, roomCode }: WinnerScreenProps) {
       >
         <TokenIcon token={winner.token} className="text-7xl" />
         <h1 className="text-3xl font-bold text-ink">{winner.name} owns the board.</h1>
-        <p className="text-sm text-muted">
-          {map.flagEmoji} {map.name}
-        </p>
+        <p className="text-sm text-muted">{map.name}</p>
       </motion.div>
 
       <div className="flex w-full max-w-lg flex-col gap-2">
