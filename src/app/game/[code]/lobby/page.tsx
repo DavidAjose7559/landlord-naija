@@ -30,6 +30,7 @@ export default function LobbyPage() {
   const [joining, setJoining] = useState(false);
   const [starting, setStarting] = useState(false);
   const [copied, setCopied] = useState<"code" | "link" | null>(null);
+  const [showHash, setShowHash] = useState(false);
   const [hostChangedNotice, setHostChangedNotice] = useState<string | null>(null);
   const prevHostId = useRef<string | null>(null);
 
@@ -291,16 +292,28 @@ export default function LobbyPage() {
             Leave room
           </button>
 
-          {isHost && (
-            <button
-              type="button"
-              onClick={() => handleStart(session.clientToken)}
-              disabled={!canStart || starting}
-              className="rounded-full bg-accent px-10 py-3.5 text-base font-semibold text-accent-foreground transition-colors hover:brightness-110 disabled:opacity-40"
-            >
-              {starting ? "Starting…" : canStart ? "Start Game" : "Need at least 2 players"}
-            </button>
-          )}
+          {isHost &&
+            (canStart ? (
+              <button
+                type="button"
+                onClick={() => handleStart(session.clientToken)}
+                disabled={starting}
+                className="rounded-full bg-accent px-10 py-3.5 text-base font-semibold text-accent-foreground transition-colors hover:brightness-110 disabled:opacity-40"
+              >
+                {starting ? "Starting…" : "Start Game"}
+              </button>
+            ) : (
+              // (Task 11) Was a disabled bg-accent button that looked
+              // pressable even though nothing happens when you press it —
+              // a ghost outline reads as "not ready yet," with the actual
+              // reason as a hint beneath it, not baked into a fake label.
+              <div className="flex flex-col items-center gap-1.5">
+                <span className="cursor-not-allowed rounded-full border border-dashed border-white/20 px-10 py-3.5 text-base font-semibold text-muted">
+                  Start Game
+                </span>
+                <span className="text-xs text-muted">{game.state.players.length} of 2 minimum players joined</span>
+              </div>
+            ))}
           {!isHost && <p className="text-sm text-muted">Waiting for the host to start the game…</p>}
         </>
       )}
@@ -312,12 +325,27 @@ export default function LobbyPage() {
         <ChatPanel roomCode={roomCode} session={session} players={game.state.players} messages={messages} />
       </div>
 
-      <div className="mt-4 flex max-w-md flex-col items-center gap-3 text-center">
-        <code className="break-all rounded-lg bg-surface px-4 py-2 text-xs text-muted">{game.serverSeedHash}</code>
+      {/* (Task 11) "A genuinely good feature buried in 12px grey" — lock
+          icon and a real headline lead now, with the actual hash
+          collapsed behind a toggle instead of always sitting there as a
+          wall of hex nobody reads. */}
+      <div className="mt-4 flex max-w-md flex-col items-center gap-2 text-center">
+        <button
+          type="button"
+          onClick={() => setShowHash((v) => !v)}
+          className="flex items-center gap-1.5 text-sm font-semibold text-ink"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden="true">
+            <rect x="5" y="11" width="14" height="9" rx="1.5" />
+            <path d="M8 11V7a4 4 0 018 0v4" />
+          </svg>
+          Verify every roll
+        </button>
         <p className="text-xs leading-relaxed text-muted">
           Every dice roll in this game is generated from a secret seed committed to before the first roll. When the
           game ends, the seed is revealed and you can verify every single roll yourself.
         </p>
+        {showHash && <code className="mt-1 max-w-full rounded-lg bg-surface px-4 py-2 text-[10px] break-all text-muted">{game.serverSeedHash}</code>}
       </div>
     </div>
   );
