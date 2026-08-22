@@ -9,7 +9,7 @@ import { computeGameStats, type GameStats, type StatEvent } from "@/lib/game-sta
 import { formatCAD } from "@/lib/money";
 import type { PublicGame } from "@/lib/api/public-game";
 import { supabase } from "@/lib/supabase/client";
-import { PLAYER_TOKEN_COLOR } from "@/lib/tokens";
+import { PLAYER_COLOR_HEX } from "@/lib/player-colors";
 import { verifyGameBrowser, type BrowserRollRecord, type BrowserVerifyResult } from "@/lib/verify-client";
 import { Confetti } from "./Confetti";
 import { TokenIcon } from "./TokenIcon";
@@ -105,7 +105,7 @@ export function WinnerScreen({ game, roomCode }: WinnerScreenProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center gap-8 overflow-y-auto bg-canvas px-6 py-12">
-      <Confetti color={PLAYER_TOKEN_COLOR[winner.token]} />
+      <Confetti color={PLAYER_COLOR_HEX[winner.color]} />
 
       <motion.div
         initial={{ scale: 0.3, opacity: 0 }}

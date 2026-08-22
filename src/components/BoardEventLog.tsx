@@ -5,7 +5,7 @@ import type { Space } from "@/game/board";
 import type { PlayerState } from "@/game/types";
 import { buildLines, type EventRow } from "@/lib/event-log-format";
 import { supabase } from "@/lib/supabase/client";
-import { PLAYER_TOKEN_COLOR } from "@/lib/tokens";
+import { PLAYER_COLOR_HEX } from "@/lib/player-colors";
 
 interface BoardEventLogProps {
   gameId: string;
@@ -60,7 +60,7 @@ function ColoredLine({ text, players, nameColor }: { text: string; players: read
 export function BoardEventLog({ gameId, players, spaces, jailLabel, deckLabels, className }: BoardEventLogProps) {
   const [events, setEvents] = useState<EventRow[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const nameColor = useMemo(() => new Map(players.map((p) => [p.name, PLAYER_TOKEN_COLOR[p.token]])), [players]);
+  const nameColor = useMemo(() => new Map(players.map((p) => [p.name, PLAYER_COLOR_HEX[p.color]])), [players]);
 
   useEffect(() => {
     let cancelled = false;

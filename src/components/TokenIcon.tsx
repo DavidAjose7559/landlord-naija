@@ -70,7 +70,7 @@ const CLASSIC_TOKEN_SHAPES: Record<ClassicToken, React.ReactNode> = {
 // language: flat currentColor silhouette plus a single low-opacity black
 // accent for interior detail (a window, a fold, a dimple) — never a
 // second saturated colour, so the shape still recolours cleanly via
-// PLAYER_TOKEN_COLOR the same way every other token does. Emoji render
+// PLAYER_COLOR_HEX the same way every other token does. Emoji render
 // differently per device/OS and were the loudest inconsistency in the
 // token set; these replace PLAYER_TOKEN_EMOJI entirely.
 const NAIJA_TOKEN_SHAPES: Record<NaijaToken, React.ReactNode> = {

@@ -13,6 +13,7 @@ import {
   type GameAction,
 } from "./engine";
 import { DEFAULT_SETTINGS, type GameState, type PlayerState, type PlayerToken } from "./types";
+import { PLAYER_COLORS } from "@/lib/player-colors";
 
 const BOARD = MAPS.naija.spaces;
 const DECKS = MAPS.naija.decks;
@@ -24,6 +25,7 @@ function makePlayer(id: string, seatIndex: number, overrides: Partial<PlayerStat
     id,
     name: id,
     token: tokens[seatIndex % tokens.length],
+    color: PLAYER_COLORS[seatIndex % PLAYER_COLORS.length],
     seatIndex,
     cashCents: STARTING_CASH,
     position: 0,

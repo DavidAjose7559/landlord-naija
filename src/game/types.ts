@@ -1,4 +1,5 @@
 import { dollars } from "@/lib/money";
+import type { PlayerColor } from "@/lib/player-colors";
 import type { Deck } from "./board";
 import type { MapId } from "./maps/types";
 
@@ -88,6 +89,9 @@ export interface PlayerState {
   id: string;
   name: string;
   token: PlayerToken;
+  // (Task 10b) Chosen at join time, separate from the token — ownership
+  // rings and every player-identity dot key off this now, not the token.
+  color: PlayerColor;
   seatIndex: number;
   cashCents: number;
   position: number;

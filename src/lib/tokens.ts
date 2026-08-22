@@ -53,24 +53,3 @@ export const PLAYER_TOKEN_LABEL: Record<PlayerToken, string> = {
   iron: "Iron",
 };
 
-// Distinct per-token colour used for ownership dots on the board and
-// token accents — not the same palette as property colour groups, so the
-// two never get confused at a glance.
-export const PLAYER_TOKEN_COLOR: Record<PlayerToken, string> = {
-  danfo: "#FFC107",
-  keke: "#FF7043",
-  jollof: "#EF5350",
-  gele: "#AB47BC",
-  okada: "#42A5F5",
-  agbada: "#26A69A",
-  suya: "#A1887F",
-  bottle: "#26C6DA",
-  tophat: "#78909C",
-  racecar: "#E53935",
-  dog: "#8D6E63",
-  boot: "#6D4C41",
-  ship: "#1E88E5",
-  thimble: "#FDD835",
-  wheelbarrow: "#43A047",
-  iron: "#546E7A",
-};

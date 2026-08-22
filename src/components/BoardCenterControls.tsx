@@ -7,7 +7,7 @@ import type { ClientAction } from "@/lib/api/client-action";
 import type { PublicGame } from "@/lib/api/public-game";
 import type { PlayerSession } from "@/lib/session";
 import { formatCAD } from "@/lib/money";
-import { PLAYER_TOKEN_COLOR } from "@/lib/tokens";
+import { PLAYER_COLOR_HEX, PLAYER_COLOR_INK } from "@/lib/player-colors";
 import { supabase } from "@/lib/supabase/client";
 import { BoardEventLog } from "./BoardEventLog";
 import { DiceRoller } from "./DiceRoller";
@@ -79,8 +79,8 @@ export function BoardCenterControls({ game, session, dispatch, muted }: BoardCen
     <div className="flex h-full w-full min-w-0 max-w-full flex-col items-center gap-1.5 px-2 pt-2 pb-1 text-center">
       <div className="flex min-w-0 max-w-full items-center gap-2">
         <span
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-sm shadow"
-          style={{ backgroundColor: PLAYER_TOKEN_COLOR[currentPlayer.token] }}
+          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-sm shadow ${PLAYER_COLOR_INK}`}
+          style={{ backgroundColor: PLAYER_COLOR_HEX[currentPlayer.color] }}
           aria-hidden="true"
         >
           <TokenIcon token={currentPlayer.token} />

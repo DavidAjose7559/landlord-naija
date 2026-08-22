@@ -5,6 +5,7 @@ import type { PlayerState } from "@/game/types";
 import { callRpc, loadGameByRoomCode } from "@/lib/api/game-state";
 import { ApiError, errorResponse } from "@/lib/api/errors";
 import { parseJsonBody, parseRoomCode } from "@/lib/api/validate";
+import { autoAssignColor, PLAYER_COLORS } from "@/lib/player-colors";
 
 const joinSchema = z
   .object({
@@ -27,6 +28,9 @@ const joinSchema = z
       "wheelbarrow",
       "iron",
     ]),
+    // Optional — a player who doesn't pick one (or joins via an older
+    // client) gets the most distinct remaining colour auto-assigned below.
+    color: z.enum(PLAYER_COLORS).optional(),
   })
   .strict();
 
@@ -49,6 +53,11 @@ export async function POST(request: Request, context: { params: Promise<{ code: 
     if (game.state.players.some((p) => p.token === body.token)) {
       throw new ApiError(409, "that piece is already taken");
     }
+    const takenColors = game.state.players.map((p) => p.color);
+    if (body.color && takenColors.includes(body.color)) {
+      throw new ApiError(409, "that colour is already taken");
+    }
+    const color = body.color ?? autoAssignColor(takenColors);
 
     const playerId = randomUUID();
     // Same construction as the server seed: a real secret, not a UUID.
@@ -60,6 +69,7 @@ export async function POST(request: Request, context: { params: Promise<{ code: 
       id: playerId,
       name: body.name,
       token: body.token,
+      color,
       seatIndex,
       cashCents: startingCashCents,
       position: 0,

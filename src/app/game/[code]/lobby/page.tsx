@@ -9,6 +9,7 @@ import { TokenIcon } from "@/components/TokenIcon";
 import { useChatMessages } from "@/hooks/useChatMessages";
 import { useGame } from "@/hooks/useGame";
 import { PLAYER_TOKEN_LABEL, TOKEN_SETS } from "@/lib/tokens";
+import { PLAYER_COLOR_HEX, PLAYER_COLOR_LABEL, PLAYER_COLORS, type PlayerColor } from "@/lib/player-colors";
 import type { PlayerToken } from "@/game/types";
 
 export default function LobbyPage() {
@@ -23,6 +24,7 @@ export default function LobbyPage() {
 
   const [name, setName] = useState("");
   const [token, setToken] = useState<PlayerToken | null>(null);
+  const [color, setColor] = useState<PlayerColor | null>(null);
   const [tokenSetId, setTokenSetId] = useState<"naija" | "classic">("naija");
   const [joinError, setJoinError] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
@@ -62,7 +64,7 @@ export default function LobbyPage() {
       const res = await fetch(`/api/games/${roomCode}/join`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), token }),
+        body: JSON.stringify({ name: name.trim(), token, ...(color ? { color } : {}) }),
       });
       const body: unknown = await res.json().catch(() => null);
       if (!res.ok) {
@@ -122,6 +124,7 @@ export default function LobbyPage() {
   if (!game || game.status !== "lobby") return null;
 
   const takenTokens = new Set(game.state.players.map((p) => p.token));
+  const takenColors = new Set(game.state.players.map((p) => p.color));
   const isHost = session?.playerId === game.state.hostPlayerId;
   const canStart = game.state.players.length >= 2;
 
@@ -206,6 +209,38 @@ export default function LobbyPage() {
               })}
             </div>
           </div>
+
+          {/* (Task 10b) Explicit colour picker, separate from the token
+              picker above — ownership rings and every player-identity dot
+              key off this now, not the token. Optional: leaving it unset
+              (the default) auto-assigns the most distinct remaining
+              colour server-side on join, so this works even if nobody
+              picks. */}
+          <div className="flex w-full max-w-xs flex-col gap-2">
+            <span className="px-1 text-xs font-medium tracking-widest text-muted uppercase">Colour (optional)</span>
+            <div className="grid grid-cols-4 gap-2">
+              {PLAYER_COLORS.map((c) => {
+                const takenByOther = takenColors.has(c);
+                const selected = color === c;
+                return (
+                  <button
+                    key={c}
+                    type="button"
+                    disabled={takenByOther}
+                    onClick={() => setColor(selected ? null : c)}
+                    aria-label={PLAYER_COLOR_LABEL[c]}
+                    aria-pressed={selected}
+                    title={takenByOther ? `${PLAYER_COLOR_LABEL[c]} — taken` : PLAYER_COLOR_LABEL[c]}
+                    className={`aspect-square rounded-full transition-transform ${
+                      selected ? "ring-2 ring-ink ring-offset-2 ring-offset-canvas" : ""
+                    } ${takenByOther ? "cursor-not-allowed opacity-25 grayscale" : "hover:scale-110"}`}
+                    style={{ backgroundColor: PLAYER_COLOR_HEX[c] }}
+                  />
+                );
+              })}
+            </div>
+          </div>
+
           <button
             type="submit"
             disabled={joining || !name.trim() || !token}
@@ -227,7 +262,14 @@ export default function LobbyPage() {
                   transition={{ type: "spring", stiffness: 300, damping: 26 }}
                   className="flex items-center gap-4 rounded-2xl bg-surface px-5 py-3"
                 >
-                  <TokenIcon token={player.token} className="text-2xl" />
+                  <span className="relative">
+                    <TokenIcon token={player.token} className="text-2xl" />
+                    <span
+                      className="absolute -right-1 -bottom-1 h-2.5 w-2.5 rounded-full ring-2 ring-surface"
+                      style={{ backgroundColor: PLAYER_COLOR_HEX[player.color] }}
+                      aria-hidden="true"
+                    />
+                  </span>
                   <span className="flex-1 text-left font-medium text-ink">{player.name}</span>
                   {player.id === game.state.hostPlayerId && <span className="text-xs font-semibold text-accent">HOST</span>}
                   {player.id === session.playerId && <span className="text-xs text-muted">you</span>}

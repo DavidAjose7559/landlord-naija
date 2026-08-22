@@ -9,7 +9,7 @@ import type { PublicGame } from "@/lib/api/public-game";
 import { COLOR_GROUP_VAR, regionInkClass, TRANSPORT_PLATE_COLOR, UTILITY_PLATE_COLOR } from "@/lib/board-colors";
 import { formatCAD } from "@/lib/money";
 import type { PlayerSession } from "@/lib/session";
-import { PLAYER_TOKEN_COLOR } from "@/lib/tokens";
+import { PLAYER_COLOR_HEX, PLAYER_COLOR_INK } from "@/lib/player-colors";
 import { Money } from "./Money";
 import { RegionBadge } from "./RegionBadge";
 import { TokenIcon } from "./TokenIcon";
@@ -170,8 +170,8 @@ export function AuctionModal({ game, session, dispatch }: AuctionModalProps) {
                   </div>
                   {highBidder && (
                     <div
-                      className="ml-auto flex h-9 w-9 items-center justify-center rounded-full text-base shadow"
-                      style={{ backgroundColor: PLAYER_TOKEN_COLOR[highBidder.token] }}
+                      className={`ml-auto flex h-9 w-9 items-center justify-center rounded-full text-base shadow ${PLAYER_COLOR_INK}`}
+                      style={{ backgroundColor: PLAYER_COLOR_HEX[highBidder.color] }}
                       title={highBidder.name}
                     >
                       <TokenIcon token={highBidder.token} />

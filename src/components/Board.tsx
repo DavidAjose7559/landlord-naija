@@ -11,7 +11,7 @@ import type { PublicGame } from "@/lib/api/public-game";
 import type { PlayerSession } from "@/lib/session";
 import { formatCAD } from "@/lib/money";
 import { COLOR_GROUP_VAR, regionInkClass, TRANSPORT_PLATE_COLOR, UTILITY_PLATE_COLOR } from "@/lib/board-colors";
-import { PLAYER_TOKEN_COLOR } from "@/lib/tokens";
+import { PLAYER_COLOR_HEX, PLAYER_COLOR_INK } from "@/lib/player-colors";
 import { BoardCenterControls } from "./BoardCenterControls";
 import { TokenIcon } from "./TokenIcon";
 
@@ -281,8 +281,8 @@ function PlayerToken({
 
   return (
     <motion.div
-      className="absolute z-10 flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-sm shadow-lg"
-      style={{ backgroundColor: PLAYER_TOKEN_COLOR[player.token] }}
+      className={`absolute z-10 flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-sm shadow-lg ${PLAYER_COLOR_INK}`}
+      style={{ backgroundColor: PLAYER_COLOR_HEX[player.color] }}
       animate={{ left: `calc(${left}% + ${dx}%)`, top: `calc(${top}% + ${dy}%)` }}
       transition={{ type: "spring", stiffness: 480, damping: 32 }}
       title={player.name}
@@ -462,7 +462,7 @@ function BoardSpace({
   const ownable = space.type === "property" || space.type === "transport" || space.type === "utility";
   const own = ownable ? state.ownership[space.index] : undefined;
   const owner = own ? state.players.find((p) => p.id === own.ownerId) : undefined;
-  const ownerColor = owner ? PLAYER_TOKEN_COLOR[owner.token] : undefined;
+  const ownerColor = owner ? PLAYER_COLOR_HEX[owner.color] : undefined;
   const mortgaged = Boolean(own?.mortgaged);
 
   const plateColor =

@@ -8,6 +8,7 @@ import { reduce, type GameAction, type GameEvent } from "@/game/engine";
 import { MAPS } from "@/game/maps";
 import { DEFAULT_SETTINGS, type GameState, type PlayerState, type PlayerToken } from "@/game/types";
 import { formatCAD } from "@/lib/money";
+import { PLAYER_COLORS } from "@/lib/player-colors";
 import { buildLines, type EventRow } from "./event-log-format";
 
 const BOARD = MAPS.naija.spaces;
@@ -21,6 +22,7 @@ function makePlayer(id: string, name: string, seatIndex: number, overrides: Part
     id,
     name,
     token: tokens[seatIndex % tokens.length],
+    color: PLAYER_COLORS[seatIndex % PLAYER_COLORS.length],
     seatIndex,
     cashCents: 150_000,
     position: 0,

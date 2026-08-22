@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ChatMessageRow } from "@/hooks/useChatMessages";
 import type { PlayerState } from "@/game/types";
 import type { PlayerSession } from "@/lib/session";
-import { PLAYER_TOKEN_COLOR } from "@/lib/tokens";
+import { PLAYER_COLOR_HEX } from "@/lib/player-colors";
 import { TokenIcon } from "./TokenIcon";
 
 // (Task 3) Short words, not emoji — the button label IS the message body
@@ -77,7 +77,7 @@ export function ChatPanel({ roomCode, session, players, messages }: ChatPanelPro
         {messages.map((m) => {
           const sender = playerFor(m.player_id);
           const isOwn = session != null && m.player_id === session.playerId;
-          const color = sender ? PLAYER_TOKEN_COLOR[sender.token] : undefined;
+          const color = sender ? PLAYER_COLOR_HEX[sender.color] : undefined;
           return (
             <div key={m.id} className={`flex items-start gap-2 ${isOwn ? "flex-row-reverse" : ""}`}>
               <span

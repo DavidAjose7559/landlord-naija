@@ -28,7 +28,7 @@ import type { ClientAction } from "@/lib/api/client-action";
 import type { GameState, PlayerState, PropertyOwnership } from "@/game/types";
 import type { PlayerSession } from "@/lib/session";
 import { COLOR_GROUP_VAR, regionInkClass, TRANSPORT_PLATE_COLOR, UTILITY_PLATE_COLOR } from "@/lib/board-colors";
-import { PLAYER_TOKEN_COLOR } from "@/lib/tokens";
+import { PLAYER_COLOR_HEX } from "@/lib/player-colors";
 import { Money } from "./Money";
 import { RegionBadge } from "./RegionBadge";
 import { TokenIcon } from "./TokenIcon";
@@ -247,7 +247,7 @@ function OwnerChip({ owner }: { owner: PlayerState | undefined }) {
       </span>
     );
   }
-  const color = PLAYER_TOKEN_COLOR[owner.token];
+  const color = PLAYER_COLOR_HEX[owner.color];
   return (
     <span
       className="inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold"
@@ -652,7 +652,7 @@ function PropertyBody({
                 {chipOwner && (
                   <span
                     className="h-1.5 w-1.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: PLAYER_TOKEN_COLOR[chipOwner.token] }}
+                    style={{ backgroundColor: PLAYER_COLOR_HEX[chipOwner.color] }}
                     aria-hidden="true"
                   />
                 )}

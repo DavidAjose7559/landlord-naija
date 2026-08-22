@@ -7,8 +7,8 @@ import { MAPS } from "@/game/maps";
 import type { PlayerState, PlayerToken } from "@/game/types";
 import type { PublicGame } from "@/lib/api/public-game";
 import { COLOR_GROUP_VAR, TRANSPORT_PLATE_COLOR, UTILITY_PLATE_COLOR } from "@/lib/board-colors";
+import { PLAYER_COLOR_HEX, PLAYER_COLOR_INK, type PlayerColor } from "@/lib/player-colors";
 import type { PlayerSession } from "@/lib/session";
-import { PLAYER_TOKEN_COLOR } from "@/lib/tokens";
 import { AnimatedMoney } from "./AnimatedMoney";
 import { TokenIcon } from "./TokenIcon";
 
@@ -104,16 +104,18 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_R;
 // feature most rooms have off.
 function Avatar({
   token,
+  color,
   isActive,
   isLeader,
   turnProgress,
 }: {
   token: PlayerToken;
+  color: PlayerColor;
   isActive: boolean;
   isLeader: boolean;
   turnProgress: number | null;
 }) {
-  const color = PLAYER_TOKEN_COLOR[token];
+  const hex = PLAYER_COLOR_HEX[color];
   return (
     <div className="relative h-9 w-9 shrink-0">
       {turnProgress !== null && (
@@ -133,8 +135,8 @@ function Avatar({
         </svg>
       )}
       <div
-        className="absolute inset-[3px] flex items-center justify-center rounded-full text-base text-white"
-        style={{ backgroundColor: color }}
+        className={`absolute inset-[3px] flex items-center justify-center rounded-full text-base ${PLAYER_COLOR_INK}`}
+        style={{ backgroundColor: hex }}
       >
         <TokenIcon token={token} />
       </div>
@@ -185,7 +187,7 @@ function PlayerRow({ game, session, player, index }: { game: PublicGame; session
     >
       {isActive && <span className="absolute top-1.5 bottom-1.5 left-0 w-[3px] rounded-full bg-accent" aria-hidden="true" />}
 
-      <Avatar token={player.token} isActive={isActive} isLeader={isLeader} turnProgress={turnProgress} />
+      <Avatar token={player.token} color={player.color} isActive={isActive} isLeader={isLeader} turnProgress={turnProgress} />
 
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex items-center justify-between gap-2">
