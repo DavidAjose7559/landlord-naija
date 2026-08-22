@@ -711,7 +711,15 @@ export function Board({ state, className, onInspect, game, session, dispatch, mu
     // now permanently the fixed panel background, not a per-map one.
     <div
       data-map-id={state.settings.mapId}
-      className={`relative mx-auto w-full max-w-[760px] ${DESKTOP_MAX_WIDTH} rounded-[28px] p-3 sm:p-6 ${className ?? ""}`}
+      // (Task 5) No mx-auto here: this is a flex ITEM in a row whose parent
+      // already centres the whole [board, panel] pair with
+      // justify-center. Auto margins on a flex item absorb free space
+      // before justify-content ever sees it — with mx-auto, the board
+      // alone swallowed the entire slack as its own symmetric margins,
+      // leaving zero margin after the panel and inflating the board-panel
+      // gap to ~5x the intended 40px. mx-auto still centres it correctly
+      // on mobile, where this stacks in a column instead of a row.
+      className={`relative mx-auto w-full max-w-[760px] md:mx-0 ${DESKTOP_MAX_WIDTH} rounded-[28px] p-3 sm:p-6 ${className ?? ""}`}
       style={{
         background:
           "radial-gradient(circle at 50% 42%, var(--felt) 0%, color-mix(in srgb, var(--felt) 70%, black) 100%)",
@@ -747,16 +755,20 @@ export function Board({ state, className, onInspect, game, session, dispatch, mu
               highlighted={highlightIndex === space.index}
             />
           ))}
-          {/* The 9x9 interior isn't covered by any space — it hosts the
-              primary turn controls now (Section 4d), and would otherwise
-              fall through to the grid's own background (this map's felt
-              colour, the same one that shows through the gaps between
-              tiles), turning the whole centre into a dark void without
-              this explicit bg-board fill. */}
+          {/* (Task 5) The 9x9 interior is a defined inset well, not empty
+              parchment or a flat continuation of the tile field: 2% darker
+              than the tiles, rounded, sitting slightly below the board's
+              surface (inset shadow) the way a real card table has a felt
+              well at its centre. Hosts the turn controls (Fix B/Section 4d). */}
           <div
             ref={setBoardCenterSlot}
-            className="relative flex items-center justify-center overflow-hidden bg-board"
-            style={{ gridRow: "2 / 11", gridColumn: "2 / 11" }}
+            className="relative flex items-center justify-center overflow-hidden rounded-[12px]"
+            style={{
+              gridRow: "2 / 11",
+              gridColumn: "2 / 11",
+              backgroundColor: "color-mix(in srgb, black 2%, var(--tile))",
+              boxShadow: "inset 0 2px 6px rgba(0,0,0,.18), inset 0 0 0 1px rgba(0,0,0,.06)",
+            }}
           >
             {/* (Fix B) No longer centred/shrink-wrapped — BoardCenterControls
                 now fills this whole inset box top-to-bottom itself (turn

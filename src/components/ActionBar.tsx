@@ -54,9 +54,10 @@ export function ActionBar({ game, session, dispatch }: ActionBarProps) {
         <p className="text-center text-sm text-muted">Waiting for {debtor.name} to settle a debt.</p>
       )}
 
-      {me.bankrupt || game.turnPhase === "awaiting_auction" ? null : !isMyTurn ? (
-        game.turnPhase !== "awaiting_payment" && <p className="text-center text-sm text-muted">Waiting for your turn…</p>
-      ) : (
+      {/* (Task 5) No "Waiting for your turn…" here anymore — whose turn it
+          is now lives in the board's own centre well, where everyone is
+          already looking, not in a sidebar line nobody reads. */}
+      {me.bankrupt || game.turnPhase === "awaiting_auction" || !isMyTurn ? null : (
         <>
           {me.inJail && game.turnPhase === "awaiting_roll" && (
             <div className="flex items-center justify-between rounded-2xl bg-surface px-4 py-3">
