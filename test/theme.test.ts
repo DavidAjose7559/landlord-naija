@@ -1,12 +1,12 @@
 // Structural checks for the theme layer (src/app/globals.css) that a
-// real browser engine would otherwise be needed to verify: that every
-// token one theme defines is also defined by the other (no orphans one
-// scope silently falls back on), that the heritage palette matches the
-// spec exactly, and that no board/panel component references a raw hex
-// instead of a token. jsdom doesn't resolve CSS custom properties well
-// enough to assert this by rendering + getComputedStyle, so this reads
-// globals.css as text instead — a deliberate, meaningful substitute, not
-// a weaker stand-in.
+// real browser engine would otherwise be needed to verify — jsdom
+// doesn't resolve CSS custom properties well enough to assert this by
+// rendering + getComputedStyle, so this reads globals.css as text
+// instead. The core thing under test (task 4, "scope correction"): a map
+// may only ever redefine --felt/--tile/--ink, and only inside a
+// [data-map-id="…"] block — never the fixed panel surface tokens, and
+// never at :root, which is exactly the bug that turned the whole app
+// maroon-on-maroon when Original was selected.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -32,102 +32,116 @@ function tokenValue(block: string, name: string): string {
   return match[1].trim();
 }
 
-const modernBlock = extractBlock('[data-theme="modern"]');
-const heritageBlock = extractBlock('[data-theme="heritage"]');
+const rootBlock = extractBlock(":root");
 
-// Every rendering token (not the --h-* raw-palette names, which only
-// heritage has by design) that one theme defines, the other must too —
-// otherwise a component consuming it in the "missing" theme would
-// silently fall through to whatever :root happens to hold.
-const RENDERING_TOKENS = [
-  "color-canvas",
-  "color-canvas-edge",
-  "color-surface",
-  "color-surface-2",
-  "color-gold",
-  "color-magenta",
-  "color-danger",
-  "color-board",
-  "color-board-line",
-  "color-board-ink",
-  "color-group-brown",
-  "color-group-lightblue",
-  "color-group-pink",
-  "color-group-orange",
-  "color-group-red",
-  "color-group-yellow",
-  "color-group-green",
-  "color-group-darkblue",
-  "board-grid-gap",
-  "board-shadow",
-  "board-grain-opacity",
-  "board-corner-padding",
-  "font-board-display",
-];
+// Every map's own [data-map-id] block, keyed by MapId.
+const MAP_BLOCKS: Record<string, string> = Object.fromEntries(
+  MAP_LIST.map((m) => [m.id, extractBlock(`[data-map-id="${m.id}"]`)]),
+);
 
-describe("theme tokens (src/app/globals.css)", () => {
-  it.each(RENDERING_TOKENS)("--%s is defined by both [data-theme=modern] and [data-theme=heritage]", (name) => {
-    expect(tokenNames(modernBlock).has(name)).toBe(true);
-    expect(tokenNames(heritageBlock).has(name)).toBe(true);
+// The fixed panel/interface palette — must exist exactly once, at
+// :root, and never be redefined inside any [data-map-id] block.
+const FIXED_SURFACE_TOKENS: Record<string, string> = {
+  s0: "#0b120f",
+  s1: "#111c18",
+  s2: "#18271f",
+  s3: "#213229",
+  hi: "#f0ede4",
+};
+
+// The three variables a map is allowed to change, per map, per the
+// design review's exact table.
+const EXPECTED_FELT_TILE_INK: Record<string, { felt: string; tile: string; ink: string }> = {
+  naija: { felt: "#14201c", tile: "#f2ede0", ink: "#171512" },
+  worldTour: { felt: "#101826", tile: "#edeff2", ink: "#12161c" },
+  canada: { felt: "#16202a", tile: "#f5f7f8", ink: "#10161a" },
+  classic: { felt: "#1a1a1a", tile: "#efeae0", ink: "#161412" },
+  original: { felt: "#3a1518", tile: "#e4e8d8", ink: "#14170e" },
+};
+
+// Region colours — fixed across all five maps, defined once at :root.
+const EXPECTED_REGION_COLOURS: Record<string, string> = {
+  "color-group-brown": "#8c5e3c", // Clay
+  "color-group-lightblue": "#4cb4d9", // Lagoon
+  "color-group-pink": "#d6427e", // Hibiscus
+  "color-group-orange": "#e8701a", // Rust
+  "color-group-red": "#d22b2b", // Palm Red
+  "color-group-yellow": "#f2b705", // Amber
+  "color-group-green": "#1f8a54", // Bush
+  "color-group-darkblue": "#24486e", // Indigo
+};
+
+describe("fixed panel surface palette (task 4)", () => {
+  it.each(Object.entries(FIXED_SURFACE_TOKENS))("--%s is defined at :root with the exact spec value", (name, hex) => {
+    expect(tokenValue(rootBlock, name).toLowerCase()).toBe(hex);
   });
 
-  it("heritage's --h-* palette matches the spec exactly", () => {
-    const expected: Record<string, string> = {
-      "h-table": "#7d2b24",
-      "h-table-edge": "#5a1e19",
-      "h-board": "#dce9d5",
-      "h-board-line": "#1a1a1a",
-      "h-board-ink": "#101010",
-      "h-panel": "#2a1512",
-      "h-panel-raised": "#3a1e1a",
-      "h-gold": "#e8c547",
-      "h-magenta": "#d4437a",
-      "h-danger": "#b3382e",
-    };
-    for (const [name, hex] of Object.entries(expected)) {
-      expect(tokenValue(heritageBlock, name).toLowerCase()).toBe(hex);
+  it.each(Object.keys(FIXED_SURFACE_TOKENS))("--%s is never redefined inside any [data-map-id] block", (name) => {
+    for (const block of Object.values(MAP_BLOCKS)) {
+      expect(tokenNames(block).has(name)).toBe(false);
     }
   });
 
-  it("heritage's colour-group palette matches the spec exactly", () => {
-    const expected: Record<string, string> = {
-      "color-group-brown": "#8b5a3c",
-      "color-group-lightblue": "#a7d3e8",
-      "color-group-pink": "#d4508f",
-      "color-group-orange": "#e8892b",
-      "color-group-red": "#c4372c",
-      "color-group-yellow": "#f2d33c",
-      "color-group-green": "#2e8b4f",
-      "color-group-darkblue": "#2b4c9b",
-    };
-    for (const [name, hex] of Object.entries(expected)) {
-      expect(tokenValue(heritageBlock, name).toLowerCase()).toBe(hex);
+  it("--color-canvas/-surface/-surface-2/-ink/-muted alias the fixed surfaces, not a per-map token", () => {
+    expect(tokenValue(rootBlock, "color-canvas")).toBe("var(--s0)");
+    expect(tokenValue(rootBlock, "color-surface")).toBe("var(--s1)");
+    expect(tokenValue(rootBlock, "color-surface-2")).toBe("var(--s2)");
+    expect(tokenValue(rootBlock, "color-ink")).toBe("var(--hi)");
+  });
+});
+
+describe.each(MAP_LIST)("board frame for map: $id ($name)", (map) => {
+  const block = MAP_BLOCKS[map.id];
+  const expected = EXPECTED_FELT_TILE_INK[map.id];
+
+  it("defines exactly felt/tile/ink (plus Original's two named extras) — nothing else", () => {
+    const names = tokenNames(block);
+    const allowed = new Set(["felt", "tile", "ink", "board-grain-opacity", "board-tile-rule-width"]);
+    for (const name of names) expect(allowed.has(name)).toBe(true);
+  });
+
+  it("matches the design review's exact hex values", () => {
+    expect(tokenValue(block, "felt").toLowerCase()).toBe(expected.felt);
+    expect(tokenValue(block, "tile").toLowerCase()).toBe(expected.tile);
+    expect(tokenValue(block, "ink").toLowerCase()).toBe(expected.ink);
+  });
+});
+
+describe("Original's two named allowances (task 4)", () => {
+  it("gets a 2px ink rule where every other map gets 1.5px", () => {
+    expect(tokenValue(MAP_BLOCKS.original, "board-tile-rule-width")).toBe("2px");
+    for (const id of MAP_LIST.map((m) => m.id).filter((id) => id !== "original")) {
+      expect(tokenNames(MAP_BLOCKS[id]).has("board-tile-rule-width")).toBe(false);
     }
+    // The un-overridden default (:root) is what every other map falls
+    // through to.
+    expect(tokenValue(rootBlock, "board-tile-rule-width")).toBe("1.5px");
   });
 
-  it("heritage sits flat (no shadow) where modern casts a raised-slab shadow", () => {
-    expect(tokenValue(heritageBlock, "board-shadow")).toBe("none");
-    expect(tokenValue(modernBlock, "board-shadow")).not.toBe("none");
+  it("gets ~3% paper grain where every other map gets none", () => {
+    expect(tokenValue(MAP_BLOCKS.original, "board-grain-opacity")).toBe("0.03");
+    for (const id of MAP_LIST.map((m) => m.id).filter((id) => id !== "original")) {
+      expect(tokenNames(MAP_BLOCKS[id]).has("board-grain-opacity")).toBe(false);
+    }
+    expect(tokenValue(rootBlock, "board-grain-opacity")).toBe("0");
+  });
+});
+
+describe("region colours (task 4: fixed across all five maps)", () => {
+  it.each(Object.entries(EXPECTED_REGION_COLOURS))("--%s matches the spec exactly at :root", (name, hex) => {
+    expect(tokenValue(rootBlock, name).toLowerCase()).toBe(hex);
   });
 
-  it("heritage's grid rules are heavier and its grain stronger than modern's", () => {
-    expect(parseFloat(tokenValue(heritageBlock, "board-grid-gap"))).toBeGreaterThan(
-      parseFloat(tokenValue(modernBlock, "board-grid-gap")),
-    );
-    expect(parseFloat(tokenValue(heritageBlock, "board-grain-opacity"))).toBeGreaterThan(
-      parseFloat(tokenValue(modernBlock, "board-grain-opacity")),
-    );
-  });
-
-  it("heritage's display font resolves to Oswald, modern's to the app sans", () => {
-    expect(tokenValue(heritageBlock, "font-board-display")).toBe("var(--font-oswald)");
-    expect(tokenValue(modernBlock, "font-board-display")).toBe("var(--font-geist-sans)");
+  it.each(Object.keys(EXPECTED_REGION_COLOURS))("--%s is never redefined inside any [data-map-id] block", (name) => {
+    for (const block of Object.values(MAP_BLOCKS)) {
+      expect(tokenNames(block).has(name)).toBe(false);
+    }
   });
 });
 
 // Board.tsx and the components it hands colour props to must never
 // hardcode a hex value — every colour has to come from a token so the
-// active [data-theme] scope, not the component, decides what renders.
+// active [data-map-id] scope, not the component, decides what renders.
 const THEME_AWARE_FILES = [
   "src/lib/board-colors.ts",
   "src/components/Board.tsx",

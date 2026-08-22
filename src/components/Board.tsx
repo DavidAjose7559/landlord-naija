@@ -159,8 +159,22 @@ function nameLineFontSize(line: string, scale = 1): string {
   return fluidPx(11.5, 6.3, scale);
 }
 
+// Same tiering idea as nameLineFontSize, but for the plate's region label.
+// The design review's own 6.5px is the ≤11-char case — every one-word or
+// short-pair region name (Ikeja, Harbourside, Bishopsgate) renders at
+// exactly that. Longer region names exist too (Candlewick District,
+// British Columbia, Meridian Heights run 15-19 chars) and the plate never
+// gets more than one edge-tile's width regardless of board size, so
+// without a second tier those truncate — the plate is authored per-region
+// (maps/types.ts), not per-line like NameBlock, so this reaches for a
+// smaller fixed size instead of a second authored string.
+function plateLabelFontSize(label: string, scale = 1): string {
+  if (label.length <= 11) return fluidPx(6.5, 5, scale);
+  if (label.length <= 15) return fluidPx(5.5, 4.4, scale);
+  return fluidPx(4.8, 4, scale);
+}
+
 const PLATE_HEIGHT = fluidPx(15, 10);
-const PLATE_FONT = fluidPx(6.5, 5);
 const STATE_FONT = fluidPx(8.5, 7);
 const CORNER_SCALE = CORNER_RATIO; // corners get proportionally more room than an edge tile
 
@@ -375,7 +389,7 @@ function Plate({
         <span
           className="truncate font-semibold tracking-[0.13em] uppercase"
           style={{
-            fontSize: PLATE_FONT,
+            fontSize: plateLabelFontSize(label),
             fontFamily: "var(--font-archivo)",
             // fontStretch alongside fontVariationSettings, not one or the
             // other: for an axis with a standard CSS property (wdth <->
@@ -690,9 +704,18 @@ export function Board({ state, className, onInspect, game, session, dispatch, mu
   const highlightIndex = jailHoldingIds.size > 0 ? GOTOJAIL_INDEX : null;
 
   return (
+    // (Task 4) data-map-id scopes --felt/--tile/--ink to the board's own
+    // DOM subtree — this element and nothing outside it (see globals.css,
+    // [data-map-id="…"]). Everything themed by map (this gradient
+    // included) has to read --felt, never --color-canvas: that token is
+    // now permanently the fixed panel background, not a per-map one.
     <div
+      data-map-id={state.settings.mapId}
       className={`relative mx-auto w-full max-w-[760px] ${DESKTOP_MAX_WIDTH} rounded-[28px] p-3 sm:p-6 ${className ?? ""}`}
-      style={{ background: "radial-gradient(circle at 50% 42%, var(--color-canvas) 0%, var(--color-canvas-edge) 100%)" }}
+      style={{
+        background:
+          "radial-gradient(circle at 50% 42%, var(--felt) 0%, color-mix(in srgb, var(--felt) 70%, black) 100%)",
+      }}
     >
       <div
         className="board-paper-texture relative aspect-square w-full overflow-hidden rounded-[2px] bg-board [container-type:inline-size]"
@@ -705,8 +728,15 @@ export function Board({ state, className, onInspect, game, session, dispatch, mu
           // colour shows through these (3px) gaps, and each tile below
           // is independently rounded — that separation is what reads as
           // "objects on felt" rather than a document with grid lines.
-          className="grid h-full w-full bg-canvas"
-          style={{ gap: "var(--board-grid-gap)", gridTemplateColumns: GRID_TEMPLATE, gridTemplateRows: GRID_TEMPLATE }}
+          // backgroundColor here (not bg-canvas): --color-canvas is the
+          // fixed panel background now, not this map's felt.
+          className="grid h-full w-full"
+          style={{
+            gap: "var(--board-grid-gap)",
+            gridTemplateColumns: GRID_TEMPLATE,
+            gridTemplateRows: GRID_TEMPLATE,
+            backgroundColor: "var(--felt)",
+          }}
         >
           {spaces.map((space) => (
             <BoardSpace
@@ -719,8 +749,8 @@ export function Board({ state, className, onInspect, game, session, dispatch, mu
           ))}
           {/* The 9x9 interior isn't covered by any space — it hosts the
               primary turn controls now (Section 4d), and would otherwise
-              fall through to the grid's own background (bg-canvas, the
-              dark felt table colour that shows through the gaps between
+              fall through to the grid's own background (this map's felt
+              colour, the same one that shows through the gaps between
               tiles), turning the whole centre into a dark void without
               this explicit bg-board fill. */}
           <div

@@ -12,7 +12,6 @@ import { PlayerPanel } from "@/components/PlayerPanel";
 import { TradePanel } from "@/components/TradePanel";
 import { WinnerScreen } from "@/components/WinnerScreen";
 import { PropertyInspector } from "@/components/PropertyInspector";
-import { MAPS } from "@/game/maps";
 import { useGame } from "@/hooks/useGame";
 import { useTurnWatchdog } from "@/hooks/useTurnWatchdog";
 
@@ -106,10 +105,7 @@ export default function BoardPage() {
   );
 
   return (
-    <div
-      data-theme={MAPS[game.state.settings.mapId].theme}
-      className="flex min-h-screen flex-col gap-8 bg-canvas px-4 py-8 pb-40 md:flex-row md:items-start md:justify-center md:gap-10 md:px-8 md:pb-8"
-    >
+    <div className="flex min-h-screen flex-col gap-8 bg-canvas px-4 py-8 pb-40 md:flex-row md:items-start md:justify-center md:gap-10 md:px-8 md:pb-8">
       <Board
         state={game.state}
         className="md:sticky md:top-8"

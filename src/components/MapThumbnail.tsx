@@ -27,14 +27,15 @@ function gridPosition(index: number): { row: number; col: number } {
 export function MapThumbnail({ map }: { map: GameMap }) {
   return (
     <div
-      data-theme={map.theme}
-      className="board-paper-texture relative h-12 w-12 shrink-0 overflow-hidden rounded-[4px] bg-canvas"
-      style={{ boxShadow: "var(--board-shadow)", border: "1.5px solid var(--color-board-ink)" }}
+      data-map-id={map.id}
+      className="board-paper-texture relative h-12 w-12 shrink-0 overflow-hidden rounded-[4px]"
+      style={{ boxShadow: "var(--board-shadow)", border: "1.5px solid var(--ink)", backgroundColor: "var(--felt)" }}
       aria-hidden="true"
     >
       <div
-        className="grid h-full w-full bg-canvas"
+        className="grid h-full w-full"
         style={{
+          backgroundColor: "var(--felt)",
           gap: "0.5px",
           gridTemplateColumns: `${CORNER_RATIO}fr repeat(9, 1fr) ${CORNER_RATIO}fr`,
           gridTemplateRows: `${CORNER_RATIO}fr repeat(9, 1fr) ${CORNER_RATIO}fr`,

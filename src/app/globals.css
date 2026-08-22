@@ -1,153 +1,128 @@
 @import "tailwindcss";
 
-/* Section G palette. The dark felt table (canvas/surface/surface-2) reuses
-   the app's existing semantic tokens rather than a parallel set of
-   `table`/`panel`/`panel-raised` names — same roles, retinted to the spec
-   values, so every component that already uses bg-canvas/bg-surface/etc
-   picks up the new palette for free. Genuinely new concepts (the light
-   parchment board face, its grid lines and ink, the table's vignette edge,
-   Treasure/Surprise's gold/magenta) get their own tokens. Dark-only by
-   design — no light-mode variants. */
+/* (Design system v2 §04, "scope correction") Two independent palettes:
+
+   1. The FIXED dark surface palette (--s0..--s3, --hair, --hair2, --hi,
+      --mid, --lo) — panel, modals, chat, settings, auction. Identical on
+      all five maps, always. This is what stops five maps from becoming
+      five different apps: picking Original must not turn the whole UI
+      maroon-on-maroon, only the board frame.
+   2. The board frame's own --felt/--tile/--ink, which DO vary per map —
+      but are only ever defined inside a `[data-map-id="…"]` scope that
+      wraps the board's own DOM subtree (Board.tsx's own root element,
+      not a page-level wrapper — see page.tsx). CSS custom properties
+      inherit through the DOM tree, not the React tree, so scoping the
+      attribute correctly is what keeps these three variables from
+      leaking into panel components that happen to render as Board's
+      logical siblings.
+
+   Dark-only by design — no light-mode variants. */
 :root {
-  --color-canvas: #14201c; /* table */
-  --color-canvas-edge: #0d1614; /* table-edge, board vignette only */
-  --color-surface: #1b2724; /* panel */
-  --color-surface-2: #22302c; /* panel-raised */
-  --color-ink: #f5f5f4;
-  --color-muted: #8a988f;
+  /* Fixed surfaces — never themed, all five maps (task 4). */
+  --s0: #0b120f;
+  --s1: #111c18;
+  --s2: #18271f;
+  --s3: #213229;
+  --hair: rgba(255, 255, 255, 0.075);
+  --hair2: rgba(255, 255, 255, 0.14);
+  --hi: #f0ede4;
+  --mid: rgba(240, 237, 228, 0.64);
+  --lo: rgba(240, 237, 228, 0.4);
+
+  /* Semantic aliases every panel/modal/chat/settings component already
+     consumes — fixed to the surfaces above, permanently. Nothing below
+     this block may ever redefine these four. */
+  --color-canvas: var(--s0);
+  --color-canvas-edge: color-mix(in srgb, var(--s0) 70%, black);
+  --color-surface: var(--s1);
+  --color-surface-2: var(--s2);
+  --color-ink: var(--hi);
+  --color-muted: var(--mid);
   --color-accent: #00a859;
   --color-accent-foreground: #04150c;
-  --color-danger: #c4453b;
+  --color-danger: #e5484d;
   --color-gold: #c9a227; /* Treasure */
   --color-magenta: #d6407f; /* Surprise */
 
-  --color-board: #f2ede0;
-  --color-board-line: #ddd5c2;
-  --color-board-ink: #1f2421;
+  /* Board frame — the ONLY three variables a map may change, and only
+     inside a [data-map-id] scope (see below). These :root values are
+     Naija's, doubling as the fallback for anything board-shaped that
+     somehow renders outside a [data-map-id] scope. */
+  --felt: #14201c;
+  --tile: #f2ede0;
+  --ink: #171512;
+  --color-board: var(--tile);
+  --color-board-ink: var(--ink);
+  /* Derived, not a 4th per-map variable: a hairline that's just "ink,
+     mostly faded into the tile" reads correctly against any felt/tile/ink
+     triplet without the palette needing its own dedicated line colour. */
+  --color-board-line: color-mix(in srgb, var(--ink) 14%, var(--tile));
 
-  /* Colour-group tokens — the "modern" palette (Section G), previously
-     hardcoded as raw hex directly in src/lib/board-colors.ts. Every board/
-     panel component now reads these through board-colors.ts's var()
-     references instead — see that file's comment. */
-  --color-group-brown: #8b5a2b;
-  --color-group-lightblue: #7ec8e3;
-  --color-group-pink: #e91e8c;
-  --color-group-orange: #f5821f;
-  --color-group-red: #e5484d;
-  --color-group-yellow: #f5d90a;
-  --color-group-green: #00a859;
-  --color-group-darkblue: #1e3a8a;
+  /* Region colours — fixed across all five maps (task 4): Lagos
+     Mainland, Manitoba, and Old Town are the same Clay brown. This is
+     what makes five boards feel like one game rather than five skins. */
+  --color-group-brown: #8c5e3c; /* Clay */
+  --color-group-lightblue: #4cb4d9; /* Lagoon */
+  --color-group-pink: #d6427e; /* Hibiscus */
+  --color-group-orange: #e8701a; /* Rust */
+  --color-group-red: #d22b2b; /* Palm Red */
+  --color-group-yellow: #f2b705; /* Amber */
+  --color-group-green: #1f8a54; /* Bush */
+  --color-group-darkblue: #24486e; /* Indigo */
 
   /* Transport/utility spaces aren't part of any of the 8 property
      regions (see maps.test.ts), so they can't inherit a region colour
      for their tile plate — fixed, muted, and visually distinct from all
-     8 saturated region colours instead. Never themed (defined once at
-     :root, not repeated per [data-theme] scope below). */
+     8 saturated region colours instead. Never themed. */
   --color-plate-transport: #5b6b76;
   --color-plate-utility: #6b6558;
 
-  /* Board *rendering* tokens (not colours) that a theme can also vary —
-     grid rule weight, whether the board face casts a shadow, paper-grain
-     strength, and which font family property names/prices use. "modern"
-     values here double as the top-level defaults for anything rendered
-     outside a [data-theme] scope. */
+  /* Board *rendering* tokens (not colours) — fixed across all five maps
+     now (task 4 authorises exactly the three colour variables above,
+     plus Original's two named allowances below; grid gap/shadow/corner
+     padding used to vary by theme and no longer do). */
   --board-grid-gap: 3px;
   --board-shadow: 0 24px 60px -18px rgba(0, 0, 0, 0.7);
-  --board-grain-opacity: 0.03;
   --board-corner-padding: 0.25rem;
-  --font-board-display: var(--font-geist-sans);
+  --board-grain-opacity: 0;
+  --board-tile-rule-width: 1.5px;
 }
 
 /* ============================================================================
-   Theme layer (Section: "original" map / heritage look)
-
-   A GameMap carries a `theme: 'modern' | 'heritage'` field (see
-   src/game/maps/types.ts) — never a user setting, picking the map picks
-   the look. The page sets data-theme on one ancestor element
-   (src/app/game/[code]/page.tsx and lobby/page.tsx, keyed off the current
-   map's theme); every token below cascades from there to any descendant
-   through ordinary CSS custom-property inheritance, `position: fixed`
-   included — no component ever reads or branches on the theme itself,
-   they only ever consume --color-, --board-, and --font- tokens.
-
-   [data-theme="modern"] is written out explicitly (even though it's
-   identical to :root) so every map's `theme` value resolves to a real,
-   documented scope rather than three of four maps silently relying on
-   "whatever :root happens to be".
+   Per-map board frame — the only place --felt/--tile/--ink are ever
+   redefined, always scoped by [data-map-id] on Board's own root element
+   (never a page-level wrapper: see the comment at the top of this file).
    ============================================================================ */
-[data-theme="modern"] {
-  --color-canvas: #14201c;
-  --color-canvas-edge: #0d1614;
-  --color-surface: #1b2724;
-  --color-surface-2: #22302c;
-  --color-gold: #c9a227;
-  --color-magenta: #d6407f;
-  --color-danger: #c4453b;
-  --color-board: #f2ede0;
-  --color-board-line: #ddd5c2;
-  --color-board-ink: #1f2421;
-  --color-group-brown: #8b5a2b;
-  --color-group-lightblue: #7ec8e3;
-  --color-group-pink: #e91e8c;
-  --color-group-orange: #f5821f;
-  --color-group-red: #e5484d;
-  --color-group-yellow: #f5d90a;
-  --color-group-green: #00a859;
-  --color-group-darkblue: #1e3a8a;
-  --board-grid-gap: 3px;
-  --board-shadow: 0 24px 60px -18px rgba(0, 0, 0, 0.7);
-  --board-grain-opacity: 0.03;
-  --board-corner-padding: 0.25rem;
-  --font-board-display: var(--font-geist-sans);
+[data-map-id="naija"] {
+  --felt: #14201c;
+  --tile: #f2ede0;
+  --ink: #171512;
 }
-
-/* Heritage — the vintage property-trading-board look, used only by the
-   'original' map. --h-* names are the literal palette handed off for this
-   theme; every actual rendering token (--color- and --board- alike) just points
-   at one of them, so the semantic tokens components already consume stay
-   the single thing that's ever rendered from, while the --h-* names stay
-   independently greppable/documented as "the heritage palette". */
-[data-theme="heritage"] {
-  --h-table: #7d2b24;
-  --h-table-edge: #5a1e19;
-  --h-board: #dce9d5;
-  --h-board-line: #1a1a1a;
-  --h-board-ink: #101010;
-  --h-panel: #2a1512;
-  --h-panel-raised: #3a1e1a;
-  --h-gold: #e8c547;
-  --h-magenta: #d4437a;
-  --h-danger: #b3382e;
-
-  --color-canvas: var(--h-table);
-  --color-canvas-edge: var(--h-table-edge);
-  --color-surface: var(--h-panel);
-  --color-surface-2: var(--h-panel-raised);
-  --color-gold: var(--h-gold);
-  --color-magenta: var(--h-magenta);
-  --color-danger: var(--h-danger);
-  --color-board: var(--h-board);
-  --color-board-line: var(--h-board-line);
-  --color-board-ink: var(--h-board-ink);
-
-  /* Colour groups, era-tuned rather than modern web. */
-  --color-group-brown: #8b5a3c;
-  --color-group-lightblue: #a7d3e8;
-  --color-group-pink: #d4508f;
-  --color-group-orange: #e8892b;
-  --color-group-red: #c4372c;
-  --color-group-yellow: #f2d33c;
-  --color-group-green: #2e8b4f;
-  --color-group-darkblue: #2b4c9b;
-
-  /* Heavy black rules, flat (no shadow — "sits like printed card, the
-     opposite of modern's raised slab"), slightly stronger grain, denser
-     corners, Oswald for property names/prices. */
-  --board-grid-gap: 4px;
-  --board-shadow: none;
-  --board-grain-opacity: 0.04;
-  --board-corner-padding: 0.375rem;
-  --font-board-display: var(--font-oswald);
+[data-map-id="worldTour"] {
+  --felt: #101826;
+  --tile: #edeff2;
+  --ink: #12161c;
+}
+[data-map-id="canada"] {
+  --felt: #16202a;
+  --tile: #f5f7f8;
+  --ink: #10161a;
+}
+[data-map-id="classic"] {
+  --felt: #1a1a1a;
+  --tile: #efeae0;
+  --ink: #161412;
+}
+/* Original — the vintage property-trading-board look. Same three
+   variables as every other map, plus its one named extra allowance: a
+   heavier ink rule and a trace of paper grain over the tile face. Not a
+   new typeface, not a new layout, not a new panel. */
+[data-map-id="original"] {
+  --felt: #3a1518;
+  --tile: #e4e8d8;
+  --ink: #14170e;
+  --board-grain-opacity: 0.03;
+  --board-tile-rule-width: 2px;
 }
 
 @theme inline {
@@ -165,26 +140,42 @@
   --color-board: var(--color-board);
   --color-board-line: var(--color-board-line);
   --color-board-ink: var(--color-board-ink);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-inter);
   --font-mono: var(--font-geist-mono);
-  --font-board-display: var(--font-board-display);
+  --font-archivo: var(--font-archivo);
 }
 
 body {
   background: var(--color-canvas);
   color: var(--color-ink);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
-  /* "Tabular-nums money always" (Section G) — set app-wide rather than
+  /* "Tabular-nums money always" (task 4: Inter for all interface text
+     and every number, always tabular-nums) — set app-wide rather than
      hunting down every formatCAD() call site individually; the Money
      component's own explicit tabular-nums class is redundant with this
      but harmless to keep. */
   font-variant-numeric: tabular-nums;
 }
 
-/* ~3% (modern) / ~4% (heritage) opacity paper-grain texture for the board
-   face (Section G) — a single feTurbulence filter, reused via
-   background-image so it never needs to ship as a raster asset. Strength
-   comes from --board-grain-opacity so this one rule serves both themes. */
+/* Task 4 typography: "Archivo for board tiles, headings and the
+   wordmark. Inter for ALL interface text." A single tag-level rule
+   covers every heading app-wide (including the homepage's "LANDLORD"
+   wordmark, which is itself an <h1>) without hunting down each
+   component — the same approach the design doc itself takes for h3/h4. */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-archivo), Arial, Helvetica, sans-serif;
+}
+
+/* Paper-grain texture for the board face — a single feTurbulence filter,
+   reused via background-image so it never needs to ship as a raster
+   asset. Strength comes from --board-grain-opacity, which is 0 for every
+   map except Original (task 4's one named allowance: "3% paper grain
+   over the tile face"). */
 .board-paper-texture {
   position: relative;
 }
@@ -193,40 +184,23 @@ body {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  opacity: var(--board-grain-opacity, 0.03);
+  opacity: var(--board-grain-opacity, 0);
   mix-blend-mode: multiply;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
   background-size: 220px 220px;
 }
 
-/* ============================================================================
-   Heritage-specific structural overrides. Everything else (colours, grid
-   gap, shadow, grain) is a plain token swap the components already
-   consume unconditionally (see [data-theme="heritage"] above) — these
-   rules are the only place theme-specific CSS reaches into a component's
-   own class names, because "condensed/uppercase/tight-tracked display
-   type" and "a heavier ink rule" aren't expressible as a single
-   swappable custom property the way a colour is. The components
-   themselves still never branch on theme; they just always render
-   `.board-space-name` / `.board-jail-visiting` / `.board-tile-rule`, and
-   only the heritage scope has an opinion about them.
-   ============================================================================ */
-[data-theme="heritage"] .board-space-name {
-  font-family: var(--font-board-display);
-  font-weight: 700;
-  letter-spacing: -0.01em;
-}
-
-[data-theme="heritage"] .board-jail-visiting {
-  background: color-mix(in srgb, var(--h-board) 85%, var(--h-board-line));
+/* A subtle, uniform tint for the "Just visiting" strip on the jail
+   corner — derived from --ink/--tile rather than a dedicated per-map
+   colour, so it works correctly against any of the five palettes without
+   needing a theme branch. */
+.board-jail-visiting {
+  background: color-mix(in srgb, var(--ink) 8%, var(--tile));
 }
 
 /* (Design system v2 §02) The tile's ink rule — 1.5px on every map, 2px
-   on Original only ("one extra allowance as the heritage map"). */
+   on Original only (--board-tile-rule-width, task 4's other named
+   allowance). */
 .board-tile-rule {
-  border: 1.5px solid color-mix(in srgb, var(--color-board-ink) 90%, transparent);
-}
-
-[data-theme="heritage"] .board-tile-rule {
-  border-width: 2px;
+  border: var(--board-tile-rule-width, 1.5px) solid color-mix(in srgb, var(--ink) 90%, transparent);
 }

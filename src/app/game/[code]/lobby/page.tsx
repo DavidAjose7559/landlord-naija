@@ -9,7 +9,6 @@ import { TokenIcon } from "@/components/TokenIcon";
 import { useChatMessages } from "@/hooks/useChatMessages";
 import { useGame } from "@/hooks/useGame";
 import { PLAYER_TOKEN_LABEL, TOKEN_SETS } from "@/lib/tokens";
-import { MAPS } from "@/game/maps";
 import type { PlayerToken } from "@/game/types";
 
 export default function LobbyPage() {
@@ -127,10 +126,7 @@ export default function LobbyPage() {
   const canStart = game.state.players.length >= 2;
 
   return (
-    <div
-      data-theme={MAPS[game.state.settings.mapId].theme}
-      className="mx-auto flex min-h-screen w-full max-w-2xl flex-col items-center gap-10 bg-canvas px-6 py-16"
-    >
+    <div className="mx-auto flex min-h-screen w-full max-w-2xl flex-col items-center gap-10 bg-canvas px-6 py-16">
       {reconnecting && (
         <div className="flex items-center gap-2 self-stretch rounded-2xl bg-surface-2 px-4 py-2.5 text-center text-xs text-ink">
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />

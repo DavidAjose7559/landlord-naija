@@ -1,11 +1,15 @@
 import type { Metadata } from "next";
-import { Archivo, Geist, Geist_Mono, Oswald } from "next/font/google";
+import { Archivo, Geist_Mono, Inter } from "next/font/google";
 import { BugReportButton } from "@/components/BugReportButton";
 import { DiagnosticsBoot } from "@/components/DiagnosticsBoot";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// (Task 4) Inter for all interface text and every number — replaces
+// Geist Sans as the app's default sans. Every number reads
+// font-variant-numeric: tabular-nums (see the `body` rule in
+// globals.css), which Inter supports natively.
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
 });
 
@@ -14,32 +18,22 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-// Design system v2: the display face for board tiles (and, from task 4,
-// headings/the wordmark) — a true variable font (wdth + wght axes,
+// Design system v2: the display face for board tiles, headings, and the
+// wordmark (task 4) — a true variable font (wdth + wght axes,
 // self-hosted at build time by next/font, no explicit weight array
-// needed since it isn't a static-weight family). Board.tsx sets its own
+// needed since it isn't a static-weight family). Consumers set their own
 // 'wdth'/'wght' via fontVariationSettings per element; this just gets the
-// font itself onto the page.
+// font itself onto the page. Oswald (the old heritage-only display face)
+// is gone entirely — Original uses Archivo like every other map now,
+// task 4's "not a new typeface" allowance.
 const archivo = Archivo({
   variable: "--font-archivo",
   subsets: ["latin"],
   // Without this, next/font subsets the variable font down to just the
-  // wght axis and bakes wdth to its default (100) — Board.tsx's `'wdth'
-  // 76` in fontVariationSettings would then have nothing to actually
-  // move, silently rendering full-width text that overflows every tile.
+  // wght axis and bakes wdth to its default (100) — a `'wdth' 76` in
+  // fontVariationSettings would then have nothing to actually move,
+  // silently rendering full-width text that overflows every tile.
   axes: ["wdth"],
-});
-
-// Heritage theme's display face for property names/prices (see
-// --font-board-display in globals.css) — only ever rendered where
-// [data-theme="heritage"] is in scope, i.e. a room on the 'original' map.
-// next/font self-hosts it at build time (no runtime Google Fonts request,
-// no FOIT/layout-shift risk) and loading it here, once, for every route
-// means it's already warm by the time a heritage room needs it.
-const oswald = Oswald({
-  variable: "--font-oswald",
-  subsets: ["latin"],
-  weight: ["500", "700"],
 });
 
 // Needed so the opengraph-image below resolves to an absolute URL —
@@ -63,7 +57,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${oswald.variable} ${archivo.variable} h-full antialiased`}
+      className={`${inter.variable} ${geistMono.variable} ${archivo.variable} h-full antialiased`}
     >
       {/* suppressHydrationWarning: browser extensions (Grammarly, etc.) inject
           data-gr-* attributes onto <body> before React hydrates, which would
