@@ -23,6 +23,21 @@ export interface GameMapRegion {
   spaceIndexes: readonly number[];
 }
 
+// Populates PropertySpace.regionLabel from the map's own `regions` array
+// — called once per map, after both `spaces` and `regions` exist, so the
+// label can never drift out of sync with which region a space is
+// actually grouped under. Transport/utility spaces get their
+// (constant) regionLabel directly from makeTransport/makeUtility instead,
+// since "Transport"/"Utility" never varies per-map.
+export function applyRegionLabels(spaces: Space[], regions: readonly GameMapRegion[]): void {
+  for (const region of regions) {
+    for (const idx of region.spaceIndexes) {
+      const space = spaces[idx];
+      if (space.type === "property") space.regionLabel = region.name;
+    }
+  }
+}
+
 export interface GameMap {
   id: MapId;
   name: string;

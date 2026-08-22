@@ -33,28 +33,40 @@ export type ColorGroup =
 // GameMap.deckLabels).
 export type Deck = "treasure" | "surprise";
 
+// Pre-authored line breaks for the board tile (see maps/*.ts) — never
+// computed at runtime (no hyphens:auto, no measurement, no auto-fit).
+// Uppercase, max 3 lines, broken only on word/comma boundaries. The font
+// size per line is a pure function of its own character count (see
+// LINE_TIER in BoardSpace), so authoring the break is the only manual
+// step; sizing follows automatically and needs no data of its own.
+export type SpaceLines = readonly string[];
+
 export interface GoSpace {
   index: number;
   name: string;
   type: "go";
+  lines: SpaceLines;
 }
 
 export interface JailSpace {
   index: number;
   name: string;
   type: "jail";
+  lines: SpaceLines;
 }
 
 export interface FreeParkingSpace {
   index: number;
   name: string;
   type: "free";
+  lines: SpaceLines;
 }
 
 export interface GoToJailSpace {
   index: number;
   name: string;
   type: "gotojail";
+  lines: SpaceLines;
 }
 
 export interface CardSpace {
@@ -62,6 +74,7 @@ export interface CardSpace {
   name: string;
   type: "card";
   deck: Deck;
+  lines: SpaceLines;
 }
 
 // (Section 2c) Both tax spaces are a flat, automatic charge — the old
@@ -72,6 +85,7 @@ export interface TaxSpace {
   name: string;
   type: "tax";
   amount: number; // flat charge in cents
+  lines: SpaceLines;
 }
 
 export interface TransportSpace {
@@ -81,6 +95,10 @@ export interface TransportSpace {
   price: number;
   mortgageValue: number;
   unmortgageCost: number;
+  lines: SpaceLines;
+  // Always "Transport" — set once in makeTransport, not per-space data
+  // (unlike PropertySpace.regionLabel, which genuinely varies).
+  regionLabel: string;
 }
 
 export interface UtilitySpace {
@@ -90,6 +108,8 @@ export interface UtilitySpace {
   price: number;
   mortgageValue: number;
   unmortgageCost: number;
+  lines: SpaceLines;
+  regionLabel: string;
 }
 
 // rent tuple is indexed [0 houses, 1, 2, 3, 4, hotel]
@@ -105,6 +125,12 @@ export interface PropertySpace {
   houseCost: number;
   mortgageValue: number;
   unmortgageCost: number;
+  lines: SpaceLines;
+  // Populated by applyRegionLabels() (maps/types.ts) from the map's own
+  // `regions` array once both `spaces` and `regions` exist — not threaded
+  // through makeProperty, so it can never drift from the region it's
+  // actually grouped under. Undefined only transiently, before that call.
+  regionLabel?: string;
 }
 
 export type Space =
@@ -187,6 +213,7 @@ export function makeProperty(
   name: string,
   color: ColorGroup,
   priceDollars: number,
+  lines: SpaceLines,
 ): PropertySpace {
   const price = dollars(priceDollars);
   const { mortgageValue, unmortgageCost } = computeMortgage(price);
@@ -200,26 +227,27 @@ export function makeProperty(
     houseCost: HOUSE_COST_BY_GROUP[color],
     mortgageValue,
     unmortgageCost,
+    lines,
   };
 }
 
-export function makeTransport(index: number, name: string, priceDollars: number): TransportSpace {
+export function makeTransport(index: number, name: string, priceDollars: number, lines: SpaceLines): TransportSpace {
   const price = dollars(priceDollars);
   const { mortgageValue, unmortgageCost } = computeMortgage(price);
-  return { index, name, type: "transport", price, mortgageValue, unmortgageCost };
+  return { index, name, type: "transport", price, mortgageValue, unmortgageCost, lines, regionLabel: "Transport" };
 }
 
-export function makeUtility(index: number, name: string, priceDollars: number): UtilitySpace {
+export function makeUtility(index: number, name: string, priceDollars: number, lines: SpaceLines): UtilitySpace {
   const price = dollars(priceDollars);
   const { mortgageValue, unmortgageCost } = computeMortgage(price);
-  return { index, name, type: "utility", price, mortgageValue, unmortgageCost };
+  return { index, name, type: "utility", price, mortgageValue, unmortgageCost, lines, regionLabel: "Utility" };
 }
 
 // Space 38 on every map: a plain flat tax.
-export function makeTax(index: number, name: string, amountDollars: number): TaxSpace {
-  return { index, name, type: "tax", amount: dollars(amountDollars) };
+export function makeTax(index: number, name: string, amountDollars: number, lines: SpaceLines): TaxSpace {
+  return { index, name, type: "tax", amount: dollars(amountDollars), lines };
 }
 
-export function makeCard(index: number, name: string, deck: Deck): CardSpace {
-  return { index, name, type: "card", deck };
+export function makeCard(index: number, name: string, deck: Deck, lines: SpaceLines): CardSpace {
+  return { index, name, type: "card", deck, lines };
 }

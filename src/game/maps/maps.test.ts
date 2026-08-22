@@ -2,7 +2,33 @@ import { describe, expect, it } from "vitest";
 import type { PropertySpace } from "../board";
 import { MAP_LIST } from "./index";
 
+// Punctuation the authored `lines` are allowed to drop (a comma at a
+// break point never survives into the line itself — see naija's "Old
+// GRA, Port Harcourt" -> ["OLD GRA", "PORT HARCOURT"]) vs. punctuation
+// that's actually part of a word and must survive (the apostrophe in
+// "Cooper's Yard"). Only strip whitespace and commas before comparing.
+function normalize(s: string): string {
+  return s.toUpperCase().replace(/[\s,]/g, "");
+}
+
 describe.each(MAP_LIST)("map: $id ($name)", (map) => {
+  it("has pre-authored line breaks for every space: uppercase, max 3 lines, no line over 14 chars, no partial words", () => {
+    for (const space of map.spaces) {
+      expect(space.lines.length, `${space.name} has no lines`).toBeGreaterThan(0);
+      expect(space.lines.length, `${space.name} has more than 3 lines`).toBeLessThanOrEqual(3);
+      for (const line of space.lines) {
+        expect(line, `${space.name}: "${line}" is not uppercase`).toBe(line.toUpperCase());
+        expect(line.length, `${space.name}: "${line}" is longer than 14 characters`).toBeLessThanOrEqual(14);
+      }
+      // The lines, rejoined and stripped of the punctuation they're
+      // allowed to drop, must reconstruct the original name exactly —
+      // proof no letter was lost and no word was cut in half.
+      expect(normalize(space.lines.join("")), `${space.name}: lines don't reconstruct the name`).toBe(
+        normalize(space.name),
+      );
+    }
+  });
+
   it("has exactly 40 spaces, indexed 0-39 in order", () => {
     expect(map.spaces).toHaveLength(40);
     map.spaces.forEach((space, i) => expect(space.index).toBe(i));
