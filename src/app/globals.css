@@ -43,7 +43,7 @@
      strength, and which font family property names/prices use. "modern"
      values here double as the top-level defaults for anything rendered
      outside a [data-theme] scope. */
-  --board-grid-gap: 1px;
+  --board-grid-gap: 3px;
   --board-shadow: 0 24px 60px -18px rgba(0, 0, 0, 0.7);
   --board-grain-opacity: 0.03;
   --board-corner-padding: 0.25rem;
@@ -86,7 +86,7 @@
   --color-group-yellow: #f5d90a;
   --color-group-green: #00a859;
   --color-group-darkblue: #1e3a8a;
-  --board-grid-gap: 1px;
+  --board-grid-gap: 3px;
   --board-shadow: 0 24px 60px -18px rgba(0, 0, 0, 0.7);
   --board-grain-opacity: 0.03;
   --board-corner-padding: 0.25rem;
@@ -135,7 +135,7 @@
   /* Heavy black rules, flat (no shadow — "sits like printed card, the
      opposite of modern's raised slab"), slightly stronger grain, denser
      corners, Oswald for property names/prices. */
-  --board-grid-gap: 2px;
+  --board-grid-gap: 4px;
   --board-shadow: none;
   --board-grain-opacity: 0.04;
   --board-corner-padding: 0.375rem;

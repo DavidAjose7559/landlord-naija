@@ -39,7 +39,11 @@ export interface GameSettings {
   doubleRentOnFullSet: boolean;
   freeParkingCash: boolean; // tax payments pool into GameState.freeParkingPot, paid out on landing
   freeParkingSkipsTurn: boolean; // landing on Free Parking/its map equivalent forces the player to miss their next turn
-  auctionOnDecline: boolean; // decline/can't-afford -> awaiting_auction instead of staying with the bank
+  // OFF: landing on an unowned space offers BUY or DECLINE_BUY only — a
+  // decline always leaves it with the bank, no auction ever triggers.
+  // ON: the decision is BUY or START_AUCTION only — DECLINE_BUY is
+  // rejected, since there's no plain decline once auctions are on.
+  auctionsEnabled: boolean;
   collectRentWhileJailed: boolean; // false = no rent owed to a currently-jailed owner
   mortgageEnabled: boolean;
   evenBuild: boolean;
@@ -58,7 +62,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   doubleRentOnFullSet: true,
   freeParkingCash: false,
   freeParkingSkipsTurn: false,
-  auctionOnDecline: false,
+  auctionsEnabled: false,
   collectRentWhileJailed: true,
   mortgageEnabled: true,
   evenBuild: true,
@@ -71,8 +75,8 @@ export const DEFAULT_SETTINGS: GameSettings = {
 // The default is "awaiting_roll" (matches the games.turn_phase DB default).
 export type TurnPhase =
   | "awaiting_roll" // must ROLL (or PAY_JAIL_FINE/USE_JAIL_FREE if in jail)
-  | "awaiting_purchase" // landed on an unowned space; BUY or DECLINE_BUY
-  | "awaiting_auction" // (auctionOnDecline) declined/can't afford; PLACE_BID or PASS_AUCTION
+  | "awaiting_purchase" // landed on an unowned space; BUY or DECLINE_BUY/START_AUCTION depending on settings.auctionsEnabled
+  | "awaiting_auction" // (settings.auctionsEnabled) declined/can't afford; PLACE_BID or PASS_AUCTION
   | "awaiting_payment" // owes rent/tax/a card's pay effect; see pendingDebt
   | "awaiting_card" // landed on a card space; waiting for a DRAW_CARD action
   | "awaiting_end_turn" // move fully resolved; may build/trade/mortgage, then END_TURN
@@ -123,8 +127,8 @@ export interface TradeOffer {
   jailFreeCards: number;
 }
 
-// (settings.auctionOnDecline, or a manual "put up for auction") A property
-// nobody bought outright goes up for auction among every solvent player
+// (settings.auctionsEnabled, either a plain decline or START_AUCTION) A
+// property nobody bought outright goes up for auction among every solvent player
 // simultaneously (Section 3 — no more turn-by-turn bidding). `bids` is a
 // full, append-only history (most recent last) rather than just the
 // current high bid — that's what lets a bankrupt bidder's offer be

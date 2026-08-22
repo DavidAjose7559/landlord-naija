@@ -705,21 +705,33 @@ describe("settings", () => {
     expect(events.some((e) => e.type === "TURN_SKIPPED" && e.playerId === "p1")).toBe(true);
   });
 
-  it("auctionOnDecline: declining a purchase starts an auction when ON, leaves it with the bank when OFF", () => {
-    function declineOutcome(auctionOnDecline: boolean) {
-      const state = makeState([makePlayer("p1", 0, { position: 1 }), makePlayer("p2", 1)], {
-        settings: { ...DEFAULT_SETTINGS, auctionOnDecline },
-        turnPhase: "awaiting_purchase",
-      });
-      return reduce(state, { type: "DECLINE_BUY", playerId: "p1" }).state;
-    }
-    const on = declineOutcome(true);
-    expect(on.turnPhase).toBe("awaiting_auction");
-    expect(on.pendingAuction?.spaceIndex).toBe(1);
+  it("auctionsEnabled OFF: DECLINE_BUY leaves the property with the bank; START_AUCTION is rejected", () => {
+    const state = makeState([makePlayer("p1", 0, { position: 1 }), makePlayer("p2", 1)], {
+      settings: { ...DEFAULT_SETTINGS, auctionsEnabled: false },
+      turnPhase: "awaiting_purchase",
+    });
+    const declined = reduce(state, { type: "DECLINE_BUY", playerId: "p1" }).state;
+    expect(declined.turnPhase).not.toBe("awaiting_auction");
+    expect(declined.pendingAuction).toBeNull();
+    expect(declined.ownership[1]).toBeUndefined();
 
-    const off = declineOutcome(false);
-    expect(off.turnPhase).not.toBe("awaiting_auction");
-    expect(off.pendingAuction).toBeNull();
+    const rejected = reduce(state, { type: "START_AUCTION", playerId: "p1" }).state;
+    expect(rejected.turnPhase).toBe("awaiting_purchase"); // no-op — auctions are off, nothing to put up
+    expect(rejected.pendingAuction).toBeNull();
+  });
+
+  it("auctionsEnabled ON: START_AUCTION opens an auction; DECLINE_BUY is rejected (no plain decline)", () => {
+    const state = makeState([makePlayer("p1", 0, { position: 1 }), makePlayer("p2", 1)], {
+      settings: { ...DEFAULT_SETTINGS, auctionsEnabled: true },
+      turnPhase: "awaiting_purchase",
+    });
+    const auctioned = reduce(state, { type: "START_AUCTION", playerId: "p1" }).state;
+    expect(auctioned.turnPhase).toBe("awaiting_auction");
+    expect(auctioned.pendingAuction?.spaceIndex).toBe(1);
+
+    const rejected = reduce(state, { type: "DECLINE_BUY", playerId: "p1" }).state;
+    expect(rejected.turnPhase).toBe("awaiting_purchase"); // no-op — must Buy or Auction, no plain decline
+    expect(rejected.pendingAuction).toBeNull();
   });
 
   it("auction: any eligible player can bid any time (no turn order); the deadline resolution awards the high bidder", () => {
@@ -729,12 +741,12 @@ describe("settings", () => {
         makePlayer("p2", 1, { cashCents: 100_000 }),
         makePlayer("p3", 2, { cashCents: 100_000 }),
       ],
-      { settings: { ...DEFAULT_SETTINGS, auctionOnDecline: true }, turnPhase: "awaiting_purchase" },
+      { settings: { ...DEFAULT_SETTINGS, auctionsEnabled: true }, turnPhase: "awaiting_purchase" },
     );
-    const { state: afterDecline } = reduce(state, { type: "DECLINE_BUY", playerId: "p1" });
+    const { state: afterDecline } = reduce(state, { type: "START_AUCTION", playerId: "p1" });
     expect(afterDecline.pendingAuction?.eligiblePlayerIds).toEqual(["p1", "p2", "p3"]);
 
-    // p3 bids first, then p1 (the decliner) outbids them — no turn gate.
+    // p3 bids first, then p1 (the auctioneer) outbids them — no turn gate.
     const { state: afterP3 } = reduce(afterDecline, { type: "PLACE_BID", playerId: "p3", amount: 500 });
     const { state: afterP1 } = reduce(afterP3, { type: "PLACE_BID", playerId: "p1", amount: 1_000 });
     expect(afterP1.pendingAuction?.bids).toEqual([
@@ -752,9 +764,9 @@ describe("settings", () => {
   it("auction: a stale/low bid is rejected, and bidding above your own cash is rejected", () => {
     const state = makeState(
       [makePlayer("p1", 0, { position: 1, cashCents: 100_000 }), makePlayer("p2", 1, { cashCents: 300 })],
-      { settings: { ...DEFAULT_SETTINGS, auctionOnDecline: true }, turnPhase: "awaiting_purchase" },
+      { settings: { ...DEFAULT_SETTINGS, auctionsEnabled: true }, turnPhase: "awaiting_purchase" },
     );
-    const { state: afterDecline } = reduce(state, { type: "DECLINE_BUY", playerId: "p1" });
+    const { state: afterDecline } = reduce(state, { type: "START_AUCTION", playerId: "p1" });
     const { state: afterBid } = reduce(afterDecline, { type: "PLACE_BID", playerId: "p1", amount: 500 });
 
     const stale = reduce(afterBid, { type: "PLACE_BID", playerId: "p2", amount: 500 }); // not strictly higher
@@ -765,9 +777,9 @@ describe("settings", () => {
     expect(tooRich.events).toHaveLength(0);
   });
 
-  it("auction: a manual 'put up for auction' works even with auctionOnDecline OFF", () => {
+  it("auction: START_AUCTION marks the auction manual", () => {
     const state = makeState([makePlayer("p1", 0, { position: 1 }), makePlayer("p2", 1)], {
-      settings: { ...DEFAULT_SETTINGS, auctionOnDecline: false },
+      settings: { ...DEFAULT_SETTINGS, auctionsEnabled: true },
       turnPhase: "awaiting_purchase",
     });
     const { state: next, events } = reduce(state, { type: "START_AUCTION", playerId: "p1" });
@@ -778,10 +790,10 @@ describe("settings", () => {
 
   it("auction: no bids at all leaves the property with the bank", () => {
     const state = makeState([makePlayer("p1", 0, { position: 1 }), makePlayer("p2", 1)], {
-      settings: { ...DEFAULT_SETTINGS, auctionOnDecline: true },
+      settings: { ...DEFAULT_SETTINGS, auctionsEnabled: true },
       turnPhase: "awaiting_purchase",
     });
-    const { state: afterDecline } = reduce(state, { type: "DECLINE_BUY", playerId: "p1" });
+    const { state: afterDecline } = reduce(state, { type: "START_AUCTION", playerId: "p1" });
     const { state: resolved, events } = reduce(afterDecline, { type: "RESOLVE_AUCTION_TIMEOUT" });
     expect(resolved.pendingAuction).toBeNull();
     expect(resolved.ownership[1]).toBeUndefined();
@@ -795,10 +807,10 @@ describe("settings", () => {
     const p2 = makePlayer("p2", 1, { cashCents: 100_000 });
     const p3 = makePlayer("p3", 2, { cashCents: 100_000 });
     const state = makeState([p1, p2, p3], {
-      settings: { ...DEFAULT_SETTINGS, auctionOnDecline: true, allowManualBankruptcy: true },
+      settings: { ...DEFAULT_SETTINGS, auctionsEnabled: true, allowManualBankruptcy: true },
       turnPhase: "awaiting_purchase",
     });
-    const { state: afterDecline } = reduce(state, { type: "DECLINE_BUY", playerId: "p1" });
+    const { state: afterDecline } = reduce(state, { type: "START_AUCTION", playerId: "p1" });
     const { state: afterP3 } = reduce(afterDecline, { type: "PLACE_BID", playerId: "p3", amount: 500 });
     const { state: afterP2 } = reduce(afterP3, { type: "PLACE_BID", playerId: "p2", amount: 1_000 });
     expect(afterP2.pendingAuction?.eligiblePlayerIds).toContain("p2");
@@ -821,10 +833,10 @@ describe("settings", () => {
     const p2 = makePlayer("p2", 1);
     const p3 = makePlayer("p3", 2);
     const state = makeState([p1, p2, p3], {
-      settings: { ...DEFAULT_SETTINGS, auctionOnDecline: true, allowManualBankruptcy: true },
+      settings: { ...DEFAULT_SETTINGS, auctionsEnabled: true, allowManualBankruptcy: true },
       turnPhase: "awaiting_purchase",
     });
-    const { state: afterDecline } = reduce(state, { type: "DECLINE_BUY", playerId: "p1" });
+    const { state: afterDecline } = reduce(state, { type: "START_AUCTION", playerId: "p1" });
     const { state: afterP1Bankrupt } = reduce(afterDecline, { type: "DECLARE_BANKRUPT", playerId: "p1" });
     expect(afterP1Bankrupt.pendingAuction).not.toBeNull();
     const { state: afterP2Bankrupt } = reduce(afterP1Bankrupt, { type: "DECLARE_BANKRUPT", playerId: "p2" });
@@ -1471,16 +1483,29 @@ describe("FORCE_END_TURN — Section 3 turn watchdog (the game must never deadlo
     expect(events.some((e) => e.type === "TURN_TIMED_OUT" && e.playerId === "p1")).toBe(true);
   });
 
-  it("awaiting_purchase: auto-declines the stuck purchase decision (respecting auctionOnDecline)", () => {
-    const state = makeState([makePlayer("p1", 0, { position: 1 }), makePlayer("p2", 1)], {
+  it("awaiting_purchase: auto-resolves the stuck purchase decision (respecting auctionsEnabled)", () => {
+    const auctionsOn = makeState([makePlayer("p1", 0, { position: 1 }), makePlayer("p2", 1)], {
       turnPhase: "awaiting_purchase",
-      settings: { ...DEFAULT_SETTINGS, auctionOnDecline: true },
+      settings: { ...DEFAULT_SETTINGS, auctionsEnabled: true },
     });
-    const { state: next, events } = reduce(state, { type: "FORCE_END_TURN", playerId: "p1" });
-    expect(next.turnPhase).toBe("awaiting_auction"); // declined straight into the auction
-    expect(next.ownership[1]).toBeUndefined();
-    expect(events.some((e) => e.type === "TURN_TIMED_OUT")).toBe(true);
-    expect(events.some((e) => e.type === "PROPERTY_DECLINED")).toBe(true);
+    const { state: onNext, events: onEvents } = reduce(auctionsOn, { type: "FORCE_END_TURN", playerId: "p1" });
+    expect(onNext.turnPhase).toBe("awaiting_auction"); // no plain decline once auctions are on — straight to auction
+    expect(onNext.ownership[1]).toBeUndefined();
+    expect(onEvents.some((e) => e.type === "TURN_TIMED_OUT")).toBe(true);
+    expect(onEvents.some((e) => e.type === "PROPERTY_DECLINED")).toBe(true);
+
+    // CRITICAL: with auctions off, DECLINE_BUY itself is a no-op (see the
+    // ON/OFF test above) — the forced timeout must NOT fall through to
+    // that same no-op, or a stuck purchase decision would deadlock the
+    // game forever.
+    const auctionsOff = makeState([makePlayer("p1", 0, { position: 1 }), makePlayer("p2", 1)], {
+      turnPhase: "awaiting_purchase",
+      settings: { ...DEFAULT_SETTINGS, auctionsEnabled: false },
+    });
+    const { state: offNext } = reduce(auctionsOff, { type: "FORCE_END_TURN", playerId: "p1" });
+    expect(offNext.turnPhase).not.toBe("awaiting_purchase"); // resolved, not stuck
+    expect(offNext.pendingAuction).toBeNull();
+    expect(offNext.ownership[1]).toBeUndefined();
   });
 
   it("awaiting_payment: forces the stuck debtor bankrupt rather than freezing the game forever", () => {

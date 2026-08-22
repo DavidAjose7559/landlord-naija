@@ -86,15 +86,15 @@ describe("event log vocabulary — WHO, WHAT, HOW MUCH", () => {
     expect(declined.texts).toEqual(["Davido declined Ogba. It stays with the bank."]);
   });
 
-  it("declines an unowned property into an auction, which Yinka wins", () => {
+  it("puts an unowned property up for auction, which Yinka wins", () => {
     const davido = makePlayer("d", "Davido", 0, { position: 13 });
     const yinka = makePlayer("y", "Yinka", 1, { cashCents: 10_000 });
     const state = makeState([davido, yinka], {
       turnPhase: "awaiting_purchase",
-      settings: { ...DEFAULT_SETTINGS, auctionOnDecline: true },
+      settings: { ...DEFAULT_SETTINGS, auctionsEnabled: true },
     });
 
-    const declined = run(state, { type: "DECLINE_BUY", playerId: "d" });
+    const declined = run(state, { type: "START_AUCTION", playerId: "d" });
     expect(declined.texts).toEqual(["Davido declined Ogba. It's up for auction.", "Ogba is up for auction."]);
 
     const bid = run(declined.next, { type: "PLACE_BID", playerId: "y", amount: 8_500 });

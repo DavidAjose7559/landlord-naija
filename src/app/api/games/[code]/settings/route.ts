@@ -16,7 +16,7 @@ const settingsSchema = z.object({
   doubleRentOnFullSet: z.boolean(),
   freeParkingCash: z.boolean(),
   freeParkingSkipsTurn: z.boolean(),
-  auctionOnDecline: z.boolean(),
+  auctionsEnabled: z.boolean(),
   collectRentWhileJailed: z.boolean(),
   mortgageEnabled: z.boolean(),
   evenBuild: z.boolean(),

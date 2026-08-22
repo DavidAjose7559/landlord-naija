@@ -140,7 +140,7 @@ export function AuctionModal({ game, session, dispatch }: AuctionModalProps) {
           <div className="flex flex-col gap-1.5">
             <div className="h-2 w-full overflow-hidden rounded-full bg-surface-2">
               <div
-                className={`h-full rounded-full transition-[width] duration-100 ${secondsLeft <= 3 ? "bg-danger" : "bg-accent"}`}
+                className={`h-full rounded-full transition-[width] duration-100 ${secondsLeft <= 2 ? "bg-danger" : "bg-accent"}`}
                 style={{ width: `${progress * 100}%` }}
               />
             </div>

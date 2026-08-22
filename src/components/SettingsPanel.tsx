@@ -177,14 +177,14 @@ export function SettingsPanel({ game, isHost, roomCode, clientToken }: SettingsP
 
       <SettingRow
         icon="🔨"
-        title="Auction declined properties"
-        description="Off = a declined property just stays with the bank"
+        title="Auctions"
+        description="Off = Buy or Decline, unbought stays with the bank. On = Buy or Auction, no plain decline."
         isHost={isHost}
         control={
           <Toggle
-            checked={settings.auctionOnDecline}
+            checked={settings.auctionsEnabled}
             disabled={!isHost || busy}
-            onChange={(v) => patch({ auctionOnDecline: v })}
+            onChange={(v) => patch({ auctionsEnabled: v })}
           />
         }
       />

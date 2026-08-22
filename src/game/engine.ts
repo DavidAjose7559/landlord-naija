@@ -38,7 +38,7 @@ export const MAX_DOUBLES = 3;
 // shared between the API layer (which owns GameState.auctionDeadline,
 // same as turnStartedAt) and the client (which renders the countdown from
 // it), so the two can never disagree about how long an auction runs.
-export const AUCTION_DURATION_MS = 10_000;
+export const AUCTION_DURATION_MS = 5_000;
 const MAX_HOUSES_IN_BANK = 32;
 const MAX_HOTELS_IN_BANK = 12;
 const BOARD_SIZE = 40;
@@ -60,10 +60,9 @@ export type GameAction =
   | { type: "UPDATE_SETTINGS"; playerId: string; settings: Partial<GameSettings> }
   | { type: "ROLL"; playerId: string; d1: number; d2: number }
   | { type: "BUY"; playerId: string }
+  // Only when settings.auctionsEnabled is off — see handleDeclineBuy.
   | { type: "DECLINE_BUY"; playerId: string }
-  // Manual "Put up for auction" — beside Buy/Decline, works regardless of
-  // settings.auctionOnDecline (that setting only controls the automatic
-  // trigger on a plain decline).
+  // Only when settings.auctionsEnabled is on — see handleStartAuction.
   | { type: "START_AUCTION"; playerId: string }
   | { type: "PLACE_BID"; playerId: string; amount: number }
   // No explicit "pass" — the auction is simultaneous and timer-driven now
@@ -1159,25 +1158,37 @@ function handleBuy(state: GameState, playerId: string, events: GameEvent[]): voi
   state.turnPhase = nextPhaseAfterResolution(state);
 }
 
-function handleDeclineBuy(state: GameState, playerId: string, events: GameEvent[]): void {
-  const player = currentPlayer(state);
-  if (player.id !== playerId || state.turnPhase !== "awaiting_purchase") return;
-  const spaceIndex = player.position;
-  events.push({ type: "PROPERTY_DECLINED", playerId: player.id, spaceIndex });
-  if (state.settings.auctionOnDecline) {
+// Shared by a real DECLINE_BUY (only reachable when auctionsEnabled is off)
+// and by a forced timeout on awaiting_purchase (reachable either way, since
+// a stuck player never gets to choose) — the property must always end up
+// resolved one way or the other, never left stuck in awaiting_purchase.
+function resolvePurchaseNonBuy(state: GameState, spaceIndex: number, playerId: string, events: GameEvent[]): void {
+  events.push({ type: "PROPERTY_DECLINED", playerId, spaceIndex });
+  if (state.settings.auctionsEnabled) {
     startAuction(state, spaceIndex, false, events);
     return;
   }
   state.turnPhase = nextPhaseAfterResolution(state);
 }
 
-// Manual "Put up for auction" (beside Buy/Decline) — works regardless of
-// settings.auctionOnDecline, which only governs the automatic trigger on a
-// plain decline. Still only the current player, still only while the
-// purchase decision is live.
+// Only when settings.auctionsEnabled is off: a no-op decline that leaves
+// the property with the bank. Once auctions are on there's no plain
+// decline at all — Buy or Auction is the only choice (see
+// handleStartAuction) — so this rejects instead of silently auctioning.
+function handleDeclineBuy(state: GameState, playerId: string, events: GameEvent[]): void {
+  const player = currentPlayer(state);
+  if (player.id !== playerId || state.turnPhase !== "awaiting_purchase") return;
+  if (state.settings.auctionsEnabled) return;
+  resolvePurchaseNonBuy(state, player.position, player.id, events);
+}
+
+// Only when settings.auctionsEnabled is on — the other half of the
+// Buy/Auction pair (see handleDeclineBuy for the Buy/Decline pair). Still
+// only the current player, still only while the purchase decision is live.
 function handleStartAuction(state: GameState, playerId: string, events: GameEvent[]): void {
   const player = currentPlayer(state);
   if (player.id !== playerId || state.turnPhase !== "awaiting_purchase") return;
+  if (!state.settings.auctionsEnabled) return;
   const spaceIndex = player.position;
   if (state.ownership[spaceIndex]) return;
   events.push({ type: "PROPERTY_DECLINED", playerId: player.id, spaceIndex });
@@ -1482,8 +1493,9 @@ function handleEndTurn(state: GameState, playerId: string, events: GameEvent[]):
 // 3-minute default when unset — see the API route). "The game must never
 // deadlock": every phase a player can get stuck in has a resolution here,
 // each reusing the exact same handler a real player action would —
-// awaiting_purchase auto-declines (respecting auctionOnDecline, same as a
-// real DECLINE_BUY), awaiting_payment forces the debtor bankrupt (same as
+// awaiting_purchase auto-resolves via resolvePurchaseNonBuy (respecting
+// settings.auctionsEnabled, same as a real decline or a real START_AUCTION
+// would), awaiting_payment forces the debtor bankrupt (same as
 // a real DECLARE_BANKRUPT), awaiting_roll/awaiting_end_turn just skip the
 // turn. awaiting_auction has its own timeout path (RESOLVE_AUCTION_TIMEOUT)
 // since it isn't turn-bound at all; awaiting_card has no safe forced move
@@ -1503,7 +1515,7 @@ function handleForceEndTurn(state: GameState, playerId: string, events: GameEven
       return;
     case "awaiting_purchase":
       events.push({ type: "TURN_TIMED_OUT", playerId });
-      handleDeclineBuy(state, playerId, events);
+      resolvePurchaseNonBuy(state, player.position, player.id, events);
       return;
     case "awaiting_payment":
       if (!state.pendingDebt) return;

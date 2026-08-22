@@ -16,10 +16,12 @@ interface ActionBarProps {
   dispatch: (action: ClientAction) => Promise<{ ok: boolean; reason?: string } | null>;
 }
 
-// (Section 4d) Roll, End Turn, and the card draw/reveal now live in the
-// board's own centre (see BoardCenterControls) — this sidebar only ever
-// hosts the bigger, multi-choice prompts (buy/decline/auction, the debt
-// panel, jail options) that wouldn't fit in that compact slot.
+// (Fix B) Roll, End Turn, buy/decline (or buy/auction), and the card
+// draw/reveal all live in the board's own centre now (see
+// BoardCenterControls) — this sidebar only ever hosts what's left: the
+// debt panel and jail options (multi-choice prompts with enough
+// explanatory text that they'd crowd the compact centre slot) and the
+// always-available bankrupt-anytime button.
 export function ActionBar({ game, session, dispatch }: ActionBarProps) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -84,8 +86,6 @@ export function ActionBar({ game, session, dispatch }: ActionBarProps) {
             </div>
           )}
 
-          {game.turnPhase === "awaiting_purchase" && <BuyPrompt game={game} busy={busy} act={act} />}
-
           {game.turnPhase === "awaiting_payment" && game.state.pendingDebt && (
             <DebtPanel game={game} me={me} busy={busy} act={act} />
           )}
@@ -96,57 +96,6 @@ export function ActionBar({ game, session, dispatch }: ActionBarProps) {
     </div>
   );
 }
-
-function BuyPrompt({
-  game,
-  busy,
-  act,
-}: {
-  game: PublicGame;
-  busy: boolean;
-  act: (action: ClientAction) => Promise<{ ok: boolean; reason?: string } | null>;
-}) {
-  const player = game.state.players[game.state.currentPlayerIndex];
-  const space = MAPS[game.state.settings.mapId].spaces[player.position];
-  if (space.type !== "property" && space.type !== "transport" && space.type !== "utility") return null;
-
-  return (
-    <div className="flex flex-col gap-3 rounded-2xl bg-surface px-4 py-4">
-      <p className="text-sm text-ink">
-        Buy <span className="font-semibold">{space.name}</span> for{" "}
-        <span className="font-semibold">{formatCAD(space.price)}</span>?
-      </p>
-      <div className="flex gap-2">
-        <button
-          type="button"
-          disabled={busy || player.cashCents < space.price}
-          onClick={() => act({ type: "BUY" })}
-          className="flex-1 rounded-full bg-accent px-4 py-2.5 text-sm font-semibold text-accent-foreground disabled:opacity-40"
-        >
-          Buy
-        </button>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => act({ type: "DECLINE_BUY" })}
-          className="flex-1 rounded-full bg-surface-2 px-4 py-2.5 text-sm font-semibold text-ink disabled:opacity-40"
-        >
-          Decline
-        </button>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => act({ type: "START_AUCTION" })}
-          className="flex-1 rounded-full bg-surface-2 px-4 py-2.5 text-sm font-semibold text-ink disabled:opacity-40"
-          title="Send this property to auction instead of buying or declining"
-        >
-          Auction it
-        </button>
-      </div>
-    </div>
-  );
-}
-
 
 // The debt panel: never auto-liquidates anything. Choice 1 ("raise it
 // myself") is just closing this and using the normal mortgage/sell-house

@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { ActionBar } from "@/components/ActionBar";
 import { AuctionModal } from "@/components/AuctionModal";
 import { Board } from "@/components/Board";
-import { LogChatTabs } from "@/components/LogChatTabs";
+import { ChatSection } from "@/components/ChatSection";
 import { MobileSheet } from "@/components/MobileSheet";
 import { PlayerPanel } from "@/components/PlayerPanel";
 import { TradePanel } from "@/components/TradePanel";
@@ -93,15 +93,7 @@ export default function BoardPage() {
       )}
 
       <PlayerPanel game={game} session={session} dispatch={dispatch} onInspect={setInspectedIndex} />
-      <LogChatTabs
-        gameId={game.id}
-        roomCode={roomCode}
-        session={session}
-        players={game.state.players}
-        spaces={MAPS[game.state.settings.mapId].spaces}
-        jailLabel={MAPS[game.state.settings.mapId].jailLabel}
-        deckLabels={MAPS[game.state.settings.mapId].deckLabels}
-      />
+      <ChatSection gameId={game.id} roomCode={roomCode} session={session} players={game.state.players} />
 
       {pending && <p className="text-center text-xs text-muted">Syncing…</p>}
     </div>

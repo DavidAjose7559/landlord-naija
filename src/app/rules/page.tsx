@@ -75,8 +75,10 @@ export default function RulesPage() {
             on Detty December and whoever lands there collects it, instead of the money just vanishing to the bank.
           </li>
           <li>
-            <span className="font-medium text-ink">Auction on decline</span> — when on, a property nobody buys goes
-            to auction among the other players instead of staying with the bank.
+            <span className="font-medium text-ink">Auctions</span> — off, landing on an unowned space offers Buy or
+            Decline, and a decline leaves it with the bank; no auction ever runs. On, the choice is Buy or Auction
+            instead — there&apos;s no plain decline, and every solvent player (including whoever landed on it) can
+            bid, five seconds at a time, resetting on every bid.
           </li>
           <li>
             <span className="font-medium text-ink">Collect rent while jailed</span> — when off, an owner sitting in

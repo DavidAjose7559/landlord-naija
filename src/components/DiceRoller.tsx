@@ -4,7 +4,19 @@ import { useRef, useState } from "react";
 import type { ClientAction } from "@/lib/api/client-action";
 import type { PublicGame } from "@/lib/api/public-game";
 
-const DIE_FACES = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
+// 3x3 pip grid per face, row-major, true = pip present at that cell —
+// the actual physical layout of a die face, not a font glyph. Unicode die
+// faces (⚀-⚅) render as a single character whose weight/style is entirely
+// up to whatever font the browser picks, which is how they ended up
+// looking like plain black boxes — real pips are drawn, not typeset.
+const PIP_PATTERNS: Record<number, boolean[]> = {
+  1: [false, false, false, false, true, false, false, false, false],
+  2: [true, false, false, false, false, false, false, false, true],
+  3: [true, false, false, false, true, false, false, false, true],
+  4: [true, false, true, false, false, false, true, false, true],
+  5: [true, false, true, false, true, false, true, false, true],
+  6: [true, false, true, true, false, true, true, false, true],
+};
 const TUMBLE_MS = 700;
 const TUMBLE_FRAME_MS = 80;
 
@@ -67,24 +79,29 @@ export function DiceRoller({ game, isMyTurn, dispatch, muted }: DiceRollerProps)
   const shownD2 = rolling ? tumble[1] : (lastRoll?.d2 ?? null);
 
   return (
-    <div className="flex w-full max-w-full flex-col items-center gap-4">
+    <div className="flex w-full max-w-full flex-col items-center gap-2.5">
       <div className="flex gap-3" aria-hidden="true">
         <Die face={shownD1} spinning={rolling} />
         <Die face={shownD2} spinning={rolling} />
       </div>
-      {/* (Section 4e) min-w-0 lets this shrink below its text's natural
-          width instead of overflowing the board's centre on a narrow
-          mobile board — the "Waiting for Sonofdavid…" label is the long
-          case this has to survive. */}
-      <button
-        type="button"
-        onClick={handleRoll}
-        disabled={!canRoll}
-        className="min-w-0 max-w-full rounded-full bg-accent px-6 py-3 text-sm font-semibold text-accent-foreground transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 sm:px-10 sm:py-3.5 sm:text-base"
-        aria-live="polite"
-      >
-        {rolling ? "Rolling…" : isMyTurn && game.turnPhase === "awaiting_roll" ? "Roll" : waitingLabel(game, isMyTurn)}
-      </button>
+      {canRoll ? (
+        <button
+          type="button"
+          onClick={handleRoll}
+          className="min-w-0 max-w-full rounded-full bg-accent px-6 py-3 text-sm font-semibold text-accent-foreground transition-colors hover:brightness-110 sm:px-10 sm:py-3.5 sm:text-base"
+          aria-live="polite"
+        >
+          {rolling ? "Rolling…" : "Roll"}
+        </button>
+      ) : (
+        // (Fix B/5) A quiet status line, not a button — only the player
+        // who can actually act right now gets a solid, prominent CTA.
+        // Watching someone else's turn (or your own dice mid-roll) is a
+        // status, not something to click, so it shouldn't look clickable.
+        <p className="min-w-0 max-w-full truncate text-xs text-board-ink/50" aria-live="polite">
+          {rolling ? "Rolling…" : waitingLabel(game, isMyTurn)}
+        </p>
+      )}
     </div>
   );
 }
@@ -98,13 +115,20 @@ function waitingLabel(game: PublicGame, isMyTurn: boolean): string {
 }
 
 function Die({ face, spinning }: { face: number | null; spinning: boolean }) {
+  const pips = PIP_PATTERNS[face ?? 1] ?? PIP_PATTERNS[1];
   return (
     <div
-      className={`flex h-14 w-14 items-center justify-center rounded-2xl bg-surface text-4xl leading-none text-ink ${
+      className={`grid h-12 w-12 grid-cols-3 grid-rows-3 gap-0.5 rounded-lg border border-black/10 bg-white p-1.5 shadow-[0_2px_6px_rgba(0,0,0,0.25)] ${
         spinning ? "animate-[spin_0.7s_ease-in-out]" : ""
       }`}
     >
-      {face ? DIE_FACES[face - 1] : "–"}
+      {face === null
+        ? null
+        : pips.map((on, i) => (
+            <span key={i} className="flex items-center justify-center">
+              {on && <span className="h-[22%] w-[22%] rounded-full bg-zinc-800" />}
+            </span>
+          ))}
     </div>
   );
 }

@@ -33,7 +33,28 @@ interface BoardProps {
 // per edge. Index 0 (GO) is the bottom-right corner; play runs
 // bottom-right -> bottom-left -> top-left -> top-right -> back to GO,
 // matching a physical Monopoly board's layout.
+//
+// (Fix A) Tracks are NOT uniform: corners are 13.2% of the board, the 9
+// inner tracks on each edge are 8.2% — depth-to-width ~1.6, close to a
+// real board, versus the dead-flat 1:1 a uniform 11x11 grid gives every
+// cell. `TRACKS` mirrors that in `grid-template-columns`/`-rows`;
+// `trackCenterPercent` replaces the old flat `/11` division for anything
+// that needs a track's centre as a percentage of the board box (token
+// placement).
 // ============================================================================
+
+const CORNER_TRACK_PCT = 13.2;
+const EDGE_TRACK_PCT = 8.2;
+const TRACKS = [CORNER_TRACK_PCT, ...Array(9).fill(EDGE_TRACK_PCT), CORNER_TRACK_PCT];
+const GRID_TEMPLATE = `${CORNER_TRACK_PCT}% repeat(9, ${EDGE_TRACK_PCT}%) ${CORNER_TRACK_PCT}%`;
+
+// `track` is 1-indexed to match the grid-line numbering `gridPosition`
+// already returns (so callers don't have to remember to subtract 1).
+function trackCenterPercent(track: number): number {
+  let start = 0;
+  for (let i = 0; i < track - 1; i++) start += TRACKS[i];
+  return start + TRACKS[track - 1] / 2;
+}
 
 type Edge = "bottom" | "left" | "top" | "right" | "corner";
 
@@ -61,7 +82,7 @@ function gridPosition(index: number): { row: number; col: number } {
 // so it stays correct at any responsive scale.
 function centerPercent(index: number): { left: number; top: number } {
   const { row, col } = gridPosition(index);
-  return { left: ((col - 0.5) / 11) * 100, top: ((row - 0.5) / 11) * 100 };
+  return { left: trackCenterPercent(col), top: trackCenterPercent(row) };
 }
 
 // This is a single-viewer screen board, not a physical table with players
@@ -70,6 +91,16 @@ function centerPercent(index: number): { left: number; top: number } {
 // tall cell by running along the column instead of being squeezed
 // horizontally.
 const ROTATION: Record<Edge, number> = { bottom: 0, left: 90, top: 0, right: -90, corner: 0 };
+
+// (Fix A) Left/right cells are landscape boxes (13.2% wide x 8.2% tall —
+// depth runs along the width, since that's the outward direction from the
+// board's centre). Rotating their content 90deg to read along the ring
+// means the CONTENT needs a portrait box (dimensions swapped) before
+// rotation, or it overflows the cell's actual (landscape) bounds. Top/
+// bottom/corner never rotate, so they never need this — see
+// `barGoesFirst` for why only edge orientation, not rotation, varies there.
+const ROTATED_CONTENT_WIDTH_PCT = (EDGE_TRACK_PCT / CORNER_TRACK_PCT) * 100;
+const ROTATED_CONTENT_HEIGHT_PCT = (CORNER_TRACK_PCT / EDGE_TRACK_PCT) * 100;
 
 // ============================================================================
 // step-by-step token movement — a short hop (<=12 spaces, either direction)
@@ -216,20 +247,20 @@ function SpaceBar({ color }: { color: string }) {
   // globals.css) — Board.tsx never checks which theme is active, it just
   // always emits this class and lets the ambient [data-theme] scope decide
   // whether that rule exists.
-  return <div className="board-space-bar h-[clamp(6px,1.4cqw,14px)] w-full shrink-0" style={{ backgroundColor: color }} />;
+  return <div className="board-space-bar h-[clamp(4px,1.9cqw,15px)] w-full shrink-0" style={{ backgroundColor: color }} />;
 }
 
 function HousePips({ houses, hotel, barColor }: { houses: number; hotel: boolean; barColor: string }) {
   if (hotel) {
     return (
-      <div className="flex justify-center py-0.5">
+      <div className="flex shrink-0 justify-center py-0.5">
         <div className="h-2.5 w-4 rounded-[2px]" style={{ backgroundColor: barColor }} />
       </div>
     );
   }
   if (houses === 0) return null;
   return (
-    <div className="flex justify-center gap-0.5 py-0.5">
+    <div className="flex shrink-0 justify-center gap-0.5 py-0.5">
       {Array.from({ length: houses }).map((_, i) => (
         <div key={i} className="h-1.5 w-1.5 rounded-[1px] bg-accent" />
       ))}
@@ -272,14 +303,44 @@ function BoardSpace({
 
   const bar = barColor ? <SpaceBar color={barColor} /> : null;
   const content = (
-    <div className="flex flex-1 flex-col items-center justify-center gap-0.5 px-0.5 py-0.5 text-center">
-      <span className="board-space-name line-clamp-2 text-[clamp(9px,1.7cqw,15px)] leading-tight font-semibold tracking-wide text-board-ink uppercase">
-        {space.name}
-      </span>
+    // min-w-0/min-h-0 down this whole chain is load-bearing, not
+    // decorative: a flex item's default min-width/min-height is `auto`
+    // (its content's natural, unwrapped/unclamped size), not 0 — so
+    // without it, line-clamp never gets a chance to actually constrain
+    // anything: the name sizes itself to its full unwrapped width/height,
+    // blows past the cell, and only then gets hard-clipped by the cell's
+    // own overflow-hidden. That reads as text missing from both ends
+    // horizontally, or the price shoved out below the cell's bottom edge
+    // vertically — both symptoms of the same root cause.
+    //
+    // The name gets the flexible vertical space (absorbing whatever room
+    // is left after the bar and price, both shrink-0 below), but that
+    // flex-grow has to live on a WRAPPER div around the clamped span, not
+    // on the span itself: -webkit-line-clamp (which line-clamp-4 uses)
+    // measures unreliably on an element that is ALSO `flex: 1 1 0%` —
+    // Chromium/WebKit compute its box against a zero flex-basis before
+    // content is measured, so the clamp silently stops limiting anything
+    // and the name overflows its own line-clamp box. Giving the WRAPPER
+    // the flex-grow (ordinary flex-basis: auto — no conflict) and leaving
+    // the span a plain non-flex child inside it sidesteps that entirely.
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-0 overflow-hidden p-0 text-center">
+      <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden">
+        {/* line-clamp-6: NOT a design choice about how many lines a name
+            "should" take — the wrapper's own flex-1 + overflow-hidden is
+            what actually bounds it. This cap only needs to sit above
+            whatever the longest real name ever needs, so it never becomes
+            the reason a line goes missing (the earlier line-clamp-5 was
+            doing exactly that for "Murtala Muhammed Airport": the wrapper
+            had a 6th line's worth of room sitting unused, capped off by
+            an arbitrary "5"). */}
+        <span className="board-space-name line-clamp-6 min-h-0 min-w-0 [overflow-wrap:anywhere] text-[clamp(8px,1.9cqw,18px)] leading-[1] font-semibold tracking-normal text-board-ink uppercase">
+          {space.name}
+        </span>
+      </div>
       {space.type === "property" || space.type === "transport" || space.type === "utility" ? (
-        <span className="board-price text-[clamp(8px,1.5cqw,13px)] tabular-nums text-board-ink/60">{formatCAD(space.price)}</span>
+        <span className="board-price min-w-0 shrink-0 leading-[1.1] text-[clamp(8px,1.7cqw,15px)] tabular-nums text-board-ink/60">{formatCAD(space.price)}</span>
       ) : space.type === "tax" ? (
-        <span className="board-price text-[clamp(8px,1.5cqw,13px)] tabular-nums text-board-ink/60">{formatCAD(space.amount)}</span>
+        <span className="board-price min-w-0 shrink-0 leading-[1.1] text-[clamp(8px,1.7cqw,15px)] tabular-nums text-board-ink/60">{formatCAD(space.amount)}</span>
       ) : null}
       {own && !own.mortgaged && space.type === "property" && (
         <HousePips houses={own.houses} hotel={own.hotel} barColor={barColor!} />
@@ -303,7 +364,7 @@ function BoardSpace({
           inspect();
         }
       }}
-      className={`relative flex cursor-pointer overflow-hidden bg-board outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+      className={`relative flex cursor-pointer overflow-hidden rounded-[3px] bg-board outline-none focus-visible:ring-2 focus-visible:ring-accent ${
         edge === "corner" ? "items-center justify-center" : ""
       } ${highlighted ? "z-20 ring-4 ring-accent animate-pulse" : ""}`}
       style={{ gridRow: row, gridColumn: col }}
@@ -319,16 +380,27 @@ function BoardSpace({
       )}
 
       <div
-        className={`flex h-full w-full flex-col ${edge === "corner" ? "items-center justify-center gap-1 text-center" : ""}`}
+        className={`flex min-w-0 min-h-0 flex-col ${rotation ? "" : "h-full w-full"} ${
+          edge === "corner" ? "h-full w-full items-center justify-center gap-1 text-center" : ""
+        }`}
         style={{
-          ...(rotation ? { transform: `rotate(${rotation}deg)` } : undefined),
+          ...(rotation
+            ? {
+                position: "absolute",
+                left: "50%",
+                top: "50%",
+                width: `${ROTATED_CONTENT_WIDTH_PCT}%`,
+                height: `${ROTATED_CONTENT_HEIGHT_PCT}%`,
+                transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+              }
+            : undefined),
           ...(edge === "corner" ? { padding: "var(--board-corner-padding)" } : undefined),
         }}
       >
         {edge === "corner" ? (
           <>
-            <span className="text-lg leading-none">{cornerIcon(space)}</span>
-            <span className="board-space-name text-[clamp(11px,2.2cqw,18px)] leading-tight font-semibold tracking-wide text-board-ink uppercase">
+            <span className="shrink-0 text-[clamp(18px,3.6cqw,30px)] leading-none">{cornerIcon(space)}</span>
+            <span className="board-space-name line-clamp-3 min-h-0 min-w-0 [overflow-wrap:anywhere] text-[clamp(13px,2.7cqw,21px)] leading-tight font-semibold tracking-wide text-board-ink uppercase">
               {space.name}
             </span>
             {/* Always rendered for the jail corner (a space-type branch,
@@ -442,8 +514,13 @@ export function Board({ state, className, onInspect, game, session, dispatch, mu
         <div
           role="grid"
           aria-label="Game board"
-          className="grid h-full w-full grid-cols-11 grid-rows-11 bg-board-line"
-          style={{ gap: "var(--board-grid-gap)" }}
+          // (Fix 1) bg-canvas, not bg-board-line: each tile needs to read
+          // as its own discrete object sitting on the darker felt table,
+          // not a slab with hairline rules — the actual table colour
+          // showing through the (now 3px) gaps is what sells that,
+          // matched by rounded corners on each tile below.
+          className="grid h-full w-full bg-canvas"
+          style={{ gap: "var(--board-grid-gap)", gridTemplateColumns: GRID_TEMPLATE, gridTemplateRows: GRID_TEMPLATE }}
         >
           {spaces.map((space) => (
             <BoardSpace
@@ -456,17 +533,20 @@ export function Board({ state, className, onInspect, game, session, dispatch, mu
           ))}
           {/* The 9x9 interior isn't covered by any space — it hosts the
               primary turn controls now (Section 4d), and would otherwise
-              fall through to the grid's own background (bg-board-line,
-              used elsewhere purely to draw the hairline rules in the gaps
-              between cells) — a barely-there tan-on-tan mismatch in the
-              modern theme, but heritage's near-black line colour turns
-              the whole centre into a solid void without an explicit fill. */}
+              fall through to the grid's own background (bg-canvas, the
+              dark felt table colour that shows through the gaps between
+              tiles — see Fix 1 above), turning the whole centre into a
+              dark void without this explicit bg-board fill. */}
           <div
             ref={setBoardCenterSlot}
             className="relative flex items-center justify-center overflow-hidden bg-board"
             style={{ gridRow: "2 / 11", gridColumn: "2 / 11" }}
           >
-            <div className="absolute inset-0 z-10 flex items-center justify-center">
+            {/* (Fix B) No longer centred/shrink-wrapped — BoardCenterControls
+                now fills this whole inset box top-to-bottom itself (turn
+                info at top, event log stretching to the bottom edge), so
+                this just hands it the full available box. */}
+            <div className="absolute inset-0 z-10 flex flex-col">
               {game && dispatch && (
                 <BoardCenterControls game={game} session={session ?? null} dispatch={dispatch} muted={muted ?? true} />
               )}
